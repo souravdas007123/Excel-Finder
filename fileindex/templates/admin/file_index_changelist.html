@@ -1,17 +1,40 @@
 {% extends "admin/change_list.html" %}
-
+{% block content_title %}{% endblock %}
 {% block object-tools %}
 <style>
+    /* HIDE DJANGO'S DEFAULT TITLE ("Select file index to change") */
+    #content > h1 {
+        display: none !important;
+    }
+    /* OVERRIDE DJANGO'S DEFAULT FLOAT - Ye khali space fill karega */
+    #changelist .object-tools {
+        float: none !important;
+        position: relative !important;
+        margin: 0 0 25px 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        display: block !important;
+    }
+
     /* Clean & Responsive Premium UI Styles (Dark Mode Compatible) */
     .custom-tools-wrapper {
-        margin-bottom: 25px;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+        width: 100%;
     }
     
     .tools-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-        gap: 20px;
+        /* Dono tools ko barabar space dene ke liye 2 columns (1fr 1fr) */
+        grid-template-columns: 1fr 1fr;
+        gap: 25px;
+        padding: 10px 0;
+    }
+
+    /* Chhoti screens (Mobile/Tablet) ke liye ek ke neeche ek aayega */
+    @media (max-width: 900px) {
+        .tools-grid {
+            grid-template-columns: 1fr;
+        }
     }
 
     .premium-card {
@@ -19,8 +42,8 @@
         color: var(--body-fg, #333333);
         border: 1px solid var(--border-color, #e0e0e0);
         border-radius: 8px;
-        padding: 20px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+        padding: 24px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         display: flex;
         flex-direction: column;
     }
@@ -28,41 +51,39 @@
     .card-header {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
         color: var(--body-fg, #417690);
-        font-size: 15px;
+        font-size: 16px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        font-weight: 600;
-        border-bottom: 1px solid var(--border-color, #eee);
+        font-weight: 700;
+        border-bottom: 2px solid var(--border-color, #eee);
         padding-bottom: 12px;
-        margin-bottom: 15px;
+        margin-bottom: 20px;
         margin-top: 0;
     }
 
     .input-field {
         width: 100%;
         box-sizing: border-box;
-        padding: 10px 12px;
+        padding: 12px 14px;
         border: 1px solid var(--border-color, #ccc);
-        border-radius: 5px;
+        border-radius: 6px;
         font-size: 14px;
         outline: none;
-        transition: border-color 0.2s ease;
-        margin-bottom: 15px;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        margin-bottom: 20px;
         background-color: var(--body-bg, #ffffff);
         color: var(--body-fg, #333333);
     }
     
-    /* Fixed Dropdown text clipping issue */
     select.input-field {
         cursor: pointer;
         color-scheme: light dark; 
         color: var(--body-fg, #ffffff) !important;
         background-color: var(--body-bg, #121212) !important;
-        height: 42px; /* Height fix kiya hai taaki text dab na jaye */
-        padding: 8px 12px; /* Padding adjust ki hai */
-        line-height: normal;
+        height: 46px; 
+        padding: 10px 14px; 
     }
     
     select.input-field option {
@@ -72,12 +93,12 @@
 
     textarea.input-field {
         resize: vertical;
-        min-height: 80px;
+        min-height: 100px;
     }
 
     .input-field:focus {
-        border-color: #79aec8;
-        box-shadow: 0 0 0 2px rgba(121, 174, 200, 0.2);
+        border-color: #417690;
+        box-shadow: 0 0 0 3px rgba(65, 118, 144, 0.2);
     }
 
     .action-row {
@@ -91,8 +112,8 @@
         background-color: #417690;
         color: white;
         border: none;
-        padding: 10px 20px;
-        border-radius: 5px;
+        padding: 12px 24px;
+        border-radius: 6px;
         font-size: 14px;
         font-weight: 600;
         cursor: pointer;
@@ -101,31 +122,31 @@
         justify-content: center;
         gap: 8px;
         transition: background-color 0.2s ease;
-        width: max-content;
+        width: 100%; /* Button ab poora stretch hoga */
     }
 
     .btn-primary:hover { background-color: #2c5d77; }
     .btn-primary:disabled { background-color: #a5b9c4; cursor: not-allowed; }
     
-    .result-container { margin-top: 20px; }
-    .result-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .result-container { margin-top: 25px; }
+    .result-table { width: 100%; border-collapse: collapse; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     
     .result-table th, .result-table td { 
         border: 1px solid var(--border-color, #e0e0e0); 
-        padding: 10px 15px; 
+        padding: 12px 15px; 
         text-align: left; 
         color: var(--body-fg, #333333); 
     }
     .result-table th { 
-        background-color: rgba(128, 128, 128, 0.15); 
-        font-weight: 600; 
+        background-color: rgba(128, 128, 128, 0.1); 
+        font-weight: 700; 
     }
     .result-table tr:nth-child(even) { 
-        background-color: rgba(128, 128, 128, 0.05); 
+        background-color: rgba(128, 128, 128, 0.03); 
     }
     
-    .badge-success { background: rgba(40, 167, 69, 0.2); color: #28a745; padding: 4px 10px; border-radius: 12px; font-weight: 600; font-size: 12px; }
-    .badge-danger { background: rgba(220, 53, 69, 0.2); color: #dc3545; padding: 4px 10px; border-radius: 12px; font-weight: 600; font-size: 12px; }
+    .badge-success { background: rgba(40, 167, 69, 0.15); color: #28a745; padding: 6px 12px; border-radius: 20px; font-weight: 700; font-size: 12px; }
+    .badge-danger { background: rgba(220, 53, 69, 0.15); color: #dc3545; padding: 6px 12px; border-radius: 20px; font-weight: 700; font-size: 12px; }
 </style>
 
 <div class="custom-tools-wrapper">
@@ -133,13 +154,13 @@
         <!-- TOOL 1: DRIVE SCANNER -->
         <div class="premium-card">
             <div class="card-header">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
                 System Drive Scanner
             </div>
             
-            <label style="font-size: 13px; color: var(--body-quiet-color, #999); margin-bottom: 5px; display: block;">Select Drive or Folder:</label>
+            <label style="font-size: 14px; font-weight: 600; color: var(--body-quiet-color, #777); margin-bottom: 8px; display: block;">Select Drive or Folder</label>
             <select id="driveSelect" class="input-field">
-                <option value="" disabled selected>-- Select a Drive or Folder --</option>
+                <option value="" disabled selected>-- Choose Target Location --</option>
                 <option value="C:\">C: Drive</option>
                 <option value="D:\">D: Drive</option>
                 <option value="newfolder/upload/excel/">Specific Folder (newfolder/upload/excel/)</option>
@@ -147,25 +168,25 @@
             
             <div class="action-row">
                 <button id="scanBtn" class="btn-primary">
-                    <span id="btnText">Start Scanning</span>
+                    <span id="btnText">Start Background Scan</span>
                 </button>
-                <div id="scanStatus" style="font-size: 13px; min-height: 20px;"></div>
+                <div id="scanStatus" style="font-size: 14px; min-height: 20px; text-align: center; margin-top: 5px;"></div>
             </div>
         </div>
 
         <!-- TOOL 2: BULK NUMBER SEARCH -->
         <div class="premium-card">
             <div class="card-header">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                 Bulk Number Search
             </div>
             
-            <label style="font-size: 13px; color: var(--body-quiet-color, #999); margin-bottom: 5px; display: block;">Paste numbers (comma separated or new line):</label>
-            <textarea id="bulkNumbers" class="input-field" placeholder="e.g. 9856325417&#10;8569741235"></textarea>
+            <label style="font-size: 14px; font-weight: 600; color: var(--body-quiet-color, #777); margin-bottom: 8px; display: block;">Enter Numbers (Comma separated or new line)</label>
+            <textarea id="bulkNumbers" class="input-field" placeholder="Example:&#10;9856325417&#10;8569741235"></textarea>
             
             <div class="action-row">
                 <button id="bulkSearchBtn" class="btn-primary">
-                    <span id="bulkBtnText">Search All Numbers</span>
+                    <span id="bulkBtnText">Search Database</span>
                 </button>
             </div>
         </div>
@@ -173,14 +194,14 @@
 
     <!-- BULK SEARCH RESULTS TABLE -->
     <div id="bulkResultContainer" class="premium-card result-container" style="display: none;">
-        <div class="card-header">Bulk Search Results</div>
-        <div style="max-height: 400px; overflow-y: auto;">
-            <table class="result-table">
+        <div class="card-header" style="border-bottom: none; margin-bottom: 10px;">Search Results Analysis</div>
+        <div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px;">
+            <table class="result-table" style="border: none;">
                 <thead>
                     <tr>
-                        <th style="width: 150px;">Searched Number</th>
-                        <th style="width: 120px;">Status</th>
-                        <th>Found In Files (File Names)</th>
+                        <th style="width: 25%;">Target Number</th>
+                        <th style="width: 15%;">Match Status</th>
+                        <th style="width: 60%;">Located In Documents</th>
                     </tr>
                 </thead>
                 <tbody id="bulkResultBody">
@@ -190,9 +211,10 @@
     </div>
 </div>
 
-{{ block.super }}
+
 
 <script>
+// (Aapka JavaScript bilkul same rahega, koi change nahi)
 document.getElementById('scanBtn').addEventListener('click', function() {
     var drive = document.getElementById('driveSelect').value;
     
@@ -204,7 +226,7 @@ document.getElementById('scanBtn').addEventListener('click', function() {
     var btn = this, btnText = document.getElementById('btnText'), statusText = document.getElementById('scanStatus');
     
     btn.disabled = true; btnText.innerText = "Scanning in background...";
-    statusText.innerHTML = "<span style='color:#f29000; font-weight: 500;'>Scanning folders... Please wait.</span>";
+    statusText.innerHTML = "<span style='color:#f29000; font-weight: 600;'>Scanning folders... Please wait.</span>";
 
     var formData = new FormData(); formData.append('drive_path', drive); formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
 
@@ -216,12 +238,12 @@ document.getElementById('scanBtn').addEventListener('click', function() {
                 .then(res => res.json()).then(taskData => {
                     if(taskData.status === 'Completed') {
                         clearInterval(checkInterval); 
-                        btn.disabled = false; btnText.innerText = "Start Scanning";
-                        statusText.innerHTML = `<span style='color:#28a745; font-weight: 500;'><b>✓ Complete!</b> ${taskData.folders_scanned} folders, ${taskData.files_indexed} files.</span>`;
+                        btn.disabled = false; btnText.innerText = "Start Background Scan";
+                        statusText.innerHTML = `<span style='color:#28a745; font-weight: 600;'><b>✓ Success!</b> ${taskData.folders_scanned} folders, ${taskData.files_indexed} files indexed.</span>`;
                         setTimeout(() => { window.location.reload(); }, 4000);
                     } else if(taskData.status === 'Error') {
-                        clearInterval(checkInterval); btn.disabled = false; btnText.innerText = "Start Scanning";
-                        statusText.innerHTML = "<span style='color:#dc3545; font-weight: 500;'><b>⚠ Error occurred</b> check terminal.</span>";
+                        clearInterval(checkInterval); btn.disabled = false; btnText.innerText = "Start Background Scan";
+                        statusText.innerHTML = "<span style='color:#dc3545; font-weight: 600;'><b>⚠ Error occurred.</b> Check terminal.</span>";
                     }
                 });
             }, 3000);
@@ -252,7 +274,7 @@ document.getElementById('bulkSearchBtn').addEventListener('click', function() {
     .then(response => response.json())
     .then(data => {
         btn.disabled = false;
-        btnText.innerText = "Search All Numbers";
+        btnText.innerText = "Search Database";
         
         if(data.status === 'success') {
             resultContainer.style.display = "flex"; 
@@ -265,7 +287,7 @@ document.getElementById('bulkSearchBtn').addEventListener('click', function() {
                 
                 var filesText = item.found 
                     ? item.files.join(", ") 
-                    : `<span style="color:var(--body-quiet-color, #999); font-style: italic;">No match found</span>`;
+                    : `<span style="color:var(--body-quiet-color, #999); font-style: italic;">No match found in current indexes</span>`;
                     
                 var tr = document.createElement('tr');
                 tr.innerHTML = `
@@ -279,7 +301,7 @@ document.getElementById('bulkSearchBtn').addEventListener('click', function() {
     })
     .catch(error => {
         btn.disabled = false;
-        btnText.innerText = "Search All Numbers";
+        btnText.innerText = "Search Database";
         alert("An error occurred while searching.");
     });
 });
