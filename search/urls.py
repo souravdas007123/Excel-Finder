@@ -8,6 +8,6 @@ urlpatterns = [
     
     # Ye naya Bulk Search ka URL add kiya hai
     path('admin/bulk-search-api/', views.bulk_search_api, name='bulk_search'),
-    
+    path('admin/row-detail-api/', views.row_detail_api, name='row_detail'),
     path('admin/', admin.site.urls),
 ]

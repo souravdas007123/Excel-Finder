@@ -1,12 +1,11 @@
 {% extends "admin/change_list.html" %}
 {% block content_title %}{% endblock %}
 {% block object-tools %}
+{% include "admin/_fileindex_styles.html" %}
 <style>
     /* HIDE DJANGO'S DEFAULT TITLE ("Select file index to change") */
-    #content > h1 {
-        display: none !important;
-    }
-    /* OVERRIDE DJANGO'S DEFAULT FLOAT - Ye khali space fill karega */
+    #content > h1 { display: none !important; }
+    /* OVERRIDE DJANGO'S DEFAULT FLOAT */
     #changelist .object-tools {
         float: none !important;
         position: relative !important;
@@ -15,295 +14,104 @@
         width: 100% !important;
         display: block !important;
     }
-
-    /* Clean & Responsive Premium UI Styles (Dark Mode Compatible) */
-    .custom-tools-wrapper {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
-        width: 100%;
-    }
-    
-    .tools-grid {
-        display: grid;
-        /* Dono tools ko barabar space dene ke liye 2 columns (1fr 1fr) */
-        grid-template-columns: 1fr 1fr;
-        gap: 25px;
-        padding: 10px 0;
-    }
-
-    /* Chhoti screens (Mobile/Tablet) ke liye ek ke neeche ek aayega */
-    @media (max-width: 900px) {
-        .tools-grid {
-            grid-template-columns: 1fr;
-        }
-    }
-
-    .premium-card {
-        background-color: var(--body-bg, #ffffff);
-        color: var(--body-fg, #333333);
-        border: 1px solid var(--border-color, #e0e0e0);
-        border-radius: 8px;
-        padding: 24px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        display: flex;
-        flex-direction: column;
-    }
-
-    .card-header {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        color: var(--body-fg, #417690);
-        font-size: 16px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        font-weight: 700;
-        border-bottom: 2px solid var(--border-color, #eee);
-        padding-bottom: 12px;
-        margin-bottom: 20px;
-        margin-top: 0;
-    }
-
-    .input-field {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 12px 14px;
-        border: 1px solid var(--border-color, #ccc);
-        border-radius: 6px;
-        font-size: 14px;
-        outline: none;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease;
-        margin-bottom: 20px;
-        background-color: var(--body-bg, #ffffff);
-        color: var(--body-fg, #333333);
-    }
-    
-    select.input-field {
-        cursor: pointer;
-        color-scheme: light dark; 
-        color: var(--body-fg, #ffffff) !important;
-        background-color: var(--body-bg, #121212) !important;
-        height: 46px; 
-        padding: 10px 14px; 
-    }
-    
-    select.input-field option {
-        background-color: var(--body-bg, #121212);
-        color: var(--body-fg, #ffffff);
-    }
-
-    textarea.input-field {
-        resize: vertical;
-        min-height: 100px;
-    }
-
-    .input-field:focus {
-        border-color: #417690;
-        box-shadow: 0 0 0 3px rgba(65, 118, 144, 0.2);
-    }
-
-    .action-row {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        margin-top: auto; 
-    }
-
-    .btn-primary {
-        background-color: #417690;
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 6px;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        transition: background-color 0.2s ease;
-        width: 100%; /* Button ab poora stretch hoga */
-    }
-
-    .btn-primary:hover { background-color: #2c5d77; }
-    .btn-primary:disabled { background-color: #a5b9c4; cursor: not-allowed; }
-    
-    .result-container { margin-top: 25px; }
-    .result-table { width: 100%; border-collapse: collapse; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    
-    .result-table th, .result-table td { 
-        border: 1px solid var(--border-color, #e0e0e0); 
-        padding: 12px 15px; 
-        text-align: left; 
-        color: var(--body-fg, #333333); 
-    }
-    .result-table th { 
-        background-color: rgba(128, 128, 128, 0.1); 
-        font-weight: 700; 
-    }
-    .result-table tr:nth-child(even) { 
-        background-color: rgba(128, 128, 128, 0.03); 
-    }
-    
-    .badge-success { background: rgba(40, 167, 69, 0.15); color: #28a745; padding: 6px 12px; border-radius: 20px; font-weight: 700; font-size: 12px; }
-    .badge-danger { background: rgba(220, 53, 69, 0.15); color: #dc3545; padding: 6px 12px; border-radius: 20px; font-weight: 700; font-size: 12px; }
+    .scanner-wrap { max-width: 760px; padding: 10px 0; }
 </style>
 
 <div class="custom-tools-wrapper">
-    <div class="tools-grid">
-        <!-- TOOL 1: DRIVE SCANNER -->
+    <div class="scanner-wrap">
         <div class="premium-card">
             <div class="card-header">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
                 System Drive Scanner
             </div>
-            
-            <label style="font-size: 14px; font-weight: 600; color: var(--body-quiet-color, #777); margin-bottom: 8px; display: block;">Select Drive or Folder</label>
+
+            <label class="field-label">Select Drive or Folder</label>
             <select id="driveSelect" class="input-field">
                 <option value="" disabled selected>-- Choose Target Location --</option>
-                <option value="C:\">C: Drive</option>
-                <option value="D:\">D: Drive</option>
-                <option value="newfolder/upload/excel/">Specific Folder (newfolder/upload/excel/)</option>
+                {% for key, label in scan_locations %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
             </select>
-            
+
             <div class="action-row">
-                <button id="scanBtn" class="btn-primary">
-                    <span id="btnText">Start Background Scan</span>
-                </button>
+                <button id="scanBtn" class="btn-primary"><span id="btnText">Start Background Scan</span></button>
                 <div id="scanStatus" style="font-size: 14px; min-height: 20px; text-align: center; margin-top: 5px;"></div>
             </div>
-        </div>
 
-        <!-- TOOL 2: BULK NUMBER SEARCH -->
-        <div class="premium-card">
-            <div class="card-header">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                Bulk Number Search
-            </div>
-            
-            <label style="font-size: 14px; font-weight: 600; color: var(--body-quiet-color, #777); margin-bottom: 8px; display: block;">Enter Numbers (Comma separated or new line)</label>
-            <textarea id="bulkNumbers" class="input-field" placeholder="Example:&#10;9856325417&#10;8569741235"></textarea>
-            
-            <div class="action-row">
-                <button id="bulkSearchBtn" class="btn-primary">
-                    <span id="bulkBtnText">Search Database</span>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- BULK SEARCH RESULTS TABLE -->
-    <div id="bulkResultContainer" class="premium-card result-container" style="display: none;">
-        <div class="card-header" style="border-bottom: none; margin-bottom: 10px;">Search Results Analysis</div>
-        <div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px;">
-            <table class="result-table" style="border: none;">
-                <thead>
-                    <tr>
-                        <th style="width: 25%;">Target Number</th>
-                        <th style="width: 15%;">Match Status</th>
-                        <th style="width: 60%;">Located In Documents</th>
-                    </tr>
-                </thead>
-                <tbody id="bulkResultBody">
-                </tbody>
-            </table>
+            <a class="nav-link" href="{% url 'admin:fileindex_bulksearch_changelist' %}">Go to Bulk Number Search &rarr;</a>
         </div>
     </div>
 </div>
 
-
-
 <script>
-// (Aapka JavaScript bilkul same rahega, koi change nahi)
-document.getElementById('scanBtn').addEventListener('click', function() {
-    var drive = document.getElementById('driveSelect').value;
-    
-    if(!drive) {
-        alert("Please select a drive or folder first!");
-        return;
+(function () {
+    const $ = (id) => document.getElementById(id);
+    const csrf = '{{ csrf_token }}';
+    const urls = {
+        start: "{% url 'start_scan' %}",
+        check: "{% url 'check_scan' 0 %}",
+    };
+
+    async function post(url, data) {
+        const fd = new FormData();
+        Object.entries(data).forEach(([k, v]) => fd.append(k, v));
+        fd.append('csrfmiddlewaretoken', csrf);
+        const res = await fetch(url, { method: 'POST', body: fd });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || 'Request failed (' + res.status + ')');
+        return json;
     }
-    
-    var btn = this, btnText = document.getElementById('btnText'), statusText = document.getElementById('scanStatus');
-    
-    btn.disabled = true; btnText.innerText = "Scanning in background...";
-    statusText.innerHTML = "<span style='color:#f29000; font-weight: 600;'>Scanning folders... Please wait.</span>";
 
-    var formData = new FormData(); formData.append('drive_path', drive); formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+    const scanBtn = $('scanBtn'), btnText = $('btnText'), statusEl = $('scanStatus');
 
-    fetch('/admin/start-scan-api/', { method: 'POST', body: formData })
-    .then(r => r.json()).then(data => {
-        if(data.status === 'started') {
-            var checkInterval = setInterval(function() {
-                fetch('/admin/check-task/' + data.task_id + '/')
-                .then(res => res.json()).then(taskData => {
-                    if(taskData.status === 'Completed') {
-                        clearInterval(checkInterval); 
-                        btn.disabled = false; btnText.innerText = "Start Background Scan";
-                        statusText.innerHTML = `<span style='color:#28a745; font-weight: 600;'><b>✓ Success!</b> ${taskData.folders_scanned} folders, ${taskData.files_indexed} files indexed.</span>`;
-                        setTimeout(() => { window.location.reload(); }, 4000);
-                    } else if(taskData.status === 'Error') {
-                        clearInterval(checkInterval); btn.disabled = false; btnText.innerText = "Start Background Scan";
-                        statusText.innerHTML = "<span style='color:#dc3545; font-weight: 600;'><b>⚠ Error occurred.</b> Check terminal.</span>";
-                    }
-                });
-            }, 3000);
+    function setStatus(text, color) {
+        statusEl.textContent = text;
+        statusEl.style.color = color;
+        statusEl.style.fontWeight = '600';
+    }
+    function resetScanBtn() {
+        scanBtn.disabled = false;
+        btnText.textContent = 'Start Background Scan';
+    }
+
+    function poll(taskId) {
+        const url = urls.check.replace('/0/', '/' + taskId + '/');
+        const timer = setInterval(async () => {
+            try {
+                const t = await (await fetch(url)).json();
+                const counts = `${t.folders_scanned} folders · ${t.files_indexed} indexed · ${t.files_skipped} unchanged · ${t.files_failed} failed`;
+                if (t.status === 'Running') {
+                    setStatus(counts + (t.message ? ' — ' + t.message : ''), '#f29000');
+                } else if (t.status === 'Completed') {
+                    clearInterval(timer); resetScanBtn();
+                    setStatus('✓ Done! ' + counts, '#28a745');
+                    setTimeout(() => window.location.reload(), 3000);
+                } else {
+                    clearInterval(timer); resetScanBtn();
+                    setStatus('⚠ Error: ' + (t.message || 'check server logs'), '#dc3545');
+                }
+            } catch (e) {
+                clearInterval(timer); resetScanBtn();
+                setStatus('⚠ Connection lost while checking scan status.', '#dc3545');
+            }
+        }, 2000);
+    }
+
+    scanBtn.addEventListener('click', async () => {
+        const location = $('driveSelect').value;
+        if (!location) { alert('Please select a drive or folder first!'); return; }
+
+        scanBtn.disabled = true;
+        btnText.textContent = 'Scanning in background...';
+        setStatus('Starting scan...', '#f29000');
+        try {
+            const data = await post(urls.start, { location });
+            poll(data.task_id);
+        } catch (e) {
+            resetScanBtn();
+            setStatus('⚠ ' + e.message, '#dc3545');
         }
     });
-});
-
-document.getElementById('bulkSearchBtn').addEventListener('click', function() {
-    var numbers = document.getElementById('bulkNumbers').value;
-    if(!numbers.trim()) { alert("Please enter some numbers to search!"); return; }
-    
-    var btn = this;
-    var btnText = document.getElementById('bulkBtnText');
-    var resultContainer = document.getElementById('bulkResultContainer');
-    var resultBody = document.getElementById('bulkResultBody');
-    
-    btn.disabled = true;
-    btnText.innerText = "Searching database...";
-    
-    var formData = new FormData();
-    formData.append('numbers', numbers);
-    formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
-
-    fetch('/admin/bulk-search-api/', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        btn.disabled = false;
-        btnText.innerText = "Search Database";
-        
-        if(data.status === 'success') {
-            resultContainer.style.display = "flex"; 
-            resultBody.innerHTML = ""; 
-            
-            data.results.forEach(item => {
-                var statusBadge = item.found 
-                    ? `<span class="badge-success">Found</span>` 
-                    : `<span class="badge-danger">Not Found</span>`;
-                
-                var filesText = item.found 
-                    ? item.files.join(", ") 
-                    : `<span style="color:var(--body-quiet-color, #999); font-style: italic;">No match found in current indexes</span>`;
-                    
-                var tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><b>${item.number}</b></td>
-                    <td>${statusBadge}</td>
-                    <td>${filesText}</td>
-                `;
-                resultBody.appendChild(tr);
-            });
-        }
-    })
-    .catch(error => {
-        btn.disabled = false;
-        btnText.innerText = "Search Database";
-        alert("An error occurred while searching.");
-    });
-});
+})();
 </script>
 {% endblock %}

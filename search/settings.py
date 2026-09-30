@@ -77,9 +77,12 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            'timeout': 30,
+            'init_command': 'PRAGMA journal_mode=WAL;',
+        },
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -121,3 +124,20 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+SCAN_LOCATIONS = {
+    'c': {'label': 'C: Drive', 'path': 'C:\\'},
+    'd': {'label': 'D: Drive', 'path': 'D:\\'},
+    'excel': {
+        'label': 'Specific Folder (newfolder/upload/excel)',
+        'path': BASE_DIR / 'newfolder' / 'upload' / 'excel',
+    },
+}
+
+SCAN_MIN_DIGITS = 5
+
+SCAN_SKIP_DIRS = (
+    '$Recycle.Bin', 'System Volume Information', 'Windows', 'Program Files',
+    'Program Files (x86)', 'ProgramData', 'AppData', 'node_modules', '.git',
+    '__pycache__', 'venv', '.venv',
+)

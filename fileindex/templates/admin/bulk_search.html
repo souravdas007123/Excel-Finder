@@ -1,0 +1,300 @@
+{% extends "admin/base_site.html" %}
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+    &rsaquo; Bulk Number Search
+</div>
+{% endblock %}
+
+{% block content %}
+{% include "admin/_fileindex_styles.html" %}
+
+<div class="custom-tools-wrapper">
+    <!-- INPUT -->
+    <div class="premium-card">
+        <div class="card-header">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            Bulk Number Search
+        </div>
+
+        <label class="field-label" for="bulkNumbers">Enter Numbers (comma separated or one per line)</label>
+        <textarea id="bulkNumbers" class="input-field" placeholder="Example:&#10;9856325417&#10;8569741235"></textarea>
+        <div id="numCounter" class="hint">0 numbers detected · numbers shorter than {{ min_digits }} digits are ignored · Ctrl+Enter to search</div>
+
+        <div class="action-row inline">
+            <button id="bulkSearchBtn" class="btn-primary"><span id="bulkBtnText">Search Database</span></button>
+            <button id="clearBtn" class="btn-secondary" type="button">Clear</button>
+        </div>
+    </div>
+
+    <!-- RESULTS -->
+    <div id="bulkResultContainer" class="premium-card result-container" style="display: none;">
+        <div class="card-header" style="border-bottom: none; margin-bottom: 10px;">Search Results Analysis</div>
+        <div id="bulkChips" class="chips-row"></div>
+        <div id="bulkNotes"></div>
+
+        <div class="toolbar">
+            <div class="filter-group" id="filterGroup">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="found">Found</button>
+                <button class="filter-btn" data-filter="missing">Not Found</button>
+            </div>
+            <div class="filter-group">
+                <button id="copyMissingBtn" class="tool-btn">Copy not-found numbers</button>
+                <button id="exportCsvBtn" class="tool-btn">Export CSV</button>
+            </div>
+        </div>
+
+        <div style="max-height: 650px; overflow-y: auto; border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px;">
+            <table class="result-table" style="border: none;">
+                <thead>
+                    <tr>
+                        <th style="width: 5%;">#</th>
+                        <th style="width: 17%;">Target Number</th>
+                        <th style="width: 14%;">Status</th>
+                        <th style="width: 64%;">Where It Was Found</th>
+                    </tr>
+                </thead>
+                <tbody id="bulkResultBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const $ = (id) => document.getElementById(id);
+    const csrf = '{{ csrf_token }}';
+    const MIN_DIGITS = {{ min_digits }};
+    const urls = {
+        search: "{% url 'bulk_search' %}",
+        row: "{% url 'row_detail' %}",
+    };
+
+    async function post(url, data) {
+        const fd = new FormData();
+        Object.entries(data).forEach(([k, v]) => fd.append(k, v));
+        fd.append('csrfmiddlewaretoken', csrf);
+        const res = await fetch(url, { method: 'POST', body: fd });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || 'Request failed (' + res.status + ')');
+        return json;
+    }
+
+    function el(tag, text, className) {
+        const e = document.createElement(tag);
+        if (text !== undefined) e.textContent = text;   // textContent => XSS safe
+        if (className) e.className = className;
+        return e;
+    }
+
+    const searchBtn = $('bulkSearchBtn'), searchText = $('bulkBtnText');
+    const input = $('bulkNumbers');
+    let lastResults = [], currentFilter = 'all';
+
+    /* ---- live counter ---- */
+    function updateCounter() {
+        const seen = new Set();
+        input.value.split(/[,;\n]+/).forEach((p) => {
+            const n = p.replace(/\D/g, '');
+            if (n.length >= MIN_DIGITS) seen.add(n);
+        });
+        $('numCounter').textContent =
+            `${seen.size} unique number${seen.size === 1 ? '' : 's'} detected · numbers shorter than ${MIN_DIGITS} digits are ignored · Ctrl+Enter to search`;
+    }
+    input.addEventListener('input', updateCounter);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); searchBtn.click(); }
+    });
+    $('clearBtn').addEventListener('click', () => {
+        input.value = '';
+        updateCounter();
+        lastResults = [];
+        $('bulkResultContainer').style.display = 'none';
+        input.focus();
+    });
+
+    /* ---- row detail ---- */
+    function buildDetailTable(cells) {
+        const table = document.createElement('table');
+        cells.forEach((c) => {
+            const tr = table.insertRow();
+            if (c.hit) tr.className = 'cell-hit';
+            tr.insertCell().textContent = c.header ? `${c.col} · ${c.header}` : c.col;
+            tr.cells[0].className = 'h';
+            tr.insertCell().textContent = c.value;
+        });
+        const wrap = document.createElement('div');
+        wrap.appendChild(table);
+        wrap.appendChild(el('div', 'Highlighted = cell where the number was found. Headers are taken from the first row of the sheet.', 'foot'));
+        return wrap;
+    }
+
+    function attachRowDetail(btn, box, m) {
+        let loaded = false;
+        btn.addEventListener('click', async () => {
+            if (loaded) {
+                box.hidden = !box.hidden;
+                btn.textContent = box.hidden ? 'View full row' : 'Hide row';
+                return;
+            }
+            box.hidden = false;
+            box.textContent = 'Loading...';
+            try {
+                const qs = new URLSearchParams({ file_id: m.file_id, sheet: m.sheet, row: m.row, col: m.col });
+                const res = await fetch(urls.row + '?' + qs);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to load row');
+                box.replaceChildren(buildDetailTable(data.cells));
+                loaded = true;
+                btn.textContent = 'Hide row';
+            } catch (e) {
+                box.textContent = '⚠ ' + e.message;
+            }
+        });
+    }
+
+    function buildMatch(m) {
+        const item = el('div', undefined, 'match-item');
+        item.appendChild(el('div', m.file, 'match-file'));
+        const folder = el('div', m.folder, 'match-folder');
+        folder.title = m.folder;
+        item.appendChild(folder);
+
+        const tags = el('div');
+        tags.appendChild(el('span', 'Sheet: ' + (m.sheet || '-'), 'tag'));
+        tags.appendChild(el('span', 'Row: ' + m.row, 'tag'));
+        if (m.column) tags.appendChild(el('span', 'Column: ' + m.column, 'tag'));
+        if (m.modified) tags.appendChild(el('span', 'Modified: ' + m.modified, 'tag muted'));
+        const btn = el('button', 'View full row', 'link-btn');
+        btn.type = 'button';
+        tags.appendChild(btn);
+        item.appendChild(tags);
+
+        const box = el('div', undefined, 'row-detail');
+        box.hidden = true;
+        item.appendChild(box);
+        attachRowDetail(btn, box, m);
+        return item;
+    }
+
+    /* ---- results ---- */
+    function render() {
+        const frag = document.createDocumentFragment();
+        lastResults.forEach((item, idx) => {
+            if (currentFilter === 'found' && !item.found) return;
+            if (currentFilter === 'missing' && item.found) return;
+
+            const tr = document.createElement('tr');
+            tr.insertCell().textContent = idx + 1;
+            tr.insertCell().appendChild(el('b', item.number));
+
+            const statusCell = tr.insertCell();
+            statusCell.appendChild(el('span', item.found ? 'Found' : 'Not Found', item.found ? 'badge-success' : 'badge-danger'));
+            if (item.found) {
+                statusCell.appendChild(el('div',
+                    `${item.file_count} file${item.file_count > 1 ? 's' : ''} · ${item.total} match${item.total > 1 ? 'es' : ''}`, 'count-line'));
+            }
+
+            const where = tr.insertCell();
+            if (item.found) {
+                item.matches.forEach((m) => where.appendChild(buildMatch(m)));
+                if (item.total > item.matches.length) {
+                    where.appendChild(el('div', `+ ${item.total - item.matches.length} more matches not shown`, 'count-line'));
+                }
+            } else {
+                const none = el('span', 'No match found in current indexes');
+                none.style.fontStyle = 'italic';
+                none.style.color = 'var(--body-quiet-color, #999)';
+                where.appendChild(none);
+            }
+            frag.appendChild(tr);
+        });
+        $('bulkResultBody').replaceChildren(frag);
+    }
+
+    function renderSummary(s) {
+        const chips = $('bulkChips');
+        chips.replaceChildren(
+            el('span', `Searched: ${s.searched}`, 'chip'),
+            el('span', `Found: ${s.found}`, 'chip ok'),
+            el('span', `Not found: ${s.not_found}`, 'chip bad')
+        );
+        if (s.duplicates) chips.appendChild(el('span', `Duplicates removed: ${s.duplicates}`, 'chip'));
+
+        const notes = $('bulkNotes');
+        notes.replaceChildren();
+        if (s.skipped.length) {
+            notes.appendChild(el('div', `Ignored (fewer than ${s.min_digits} digits): ${s.skipped.join(', ')}`, 'note'));
+        }
+        if (s.truncated) {
+            notes.appendChild(el('div', `Only the first ${s.max_numbers} numbers were searched.`, 'note'));
+        }
+    }
+
+    $('filterGroup').addEventListener('click', (e) => {
+        const btn = e.target.closest('.filter-btn');
+        if (!btn) return;
+        currentFilter = btn.dataset.filter;
+        document.querySelectorAll('.filter-btn').forEach((b) => b.classList.toggle('active', b === btn));
+        render();
+    });
+
+    $('copyMissingBtn').addEventListener('click', async () => {
+        const missing = lastResults.filter((r) => !r.found).map((r) => r.number);
+        if (!missing.length) { alert('No missing numbers. Everything was found.'); return; }
+        try {
+            await navigator.clipboard.writeText(missing.join('\n'));
+            alert(missing.length + ' not-found numbers copied.');
+        } catch (e) {
+            alert('Copy failed. Browser blocked clipboard access.');
+        }
+    });
+
+    $('exportCsvBtn').addEventListener('click', () => {
+        if (!lastResults.length) return;
+        const q = (v) => '"' + String(v).replace(/"/g, '""') + '"';
+        const lines = [['Number', 'Status', 'File', 'Folder', 'Sheet', 'Row', 'Column', 'Modified'].map(q).join(',')];
+        lastResults.forEach((r) => {
+            if (!r.found) {
+                lines.push([r.number, 'Not Found', '', '', '', '', '', ''].map(q).join(','));
+            } else {
+                r.matches.forEach((m) => lines.push(
+                    [r.number, 'Found', m.file, m.folder, m.sheet, m.row, m.column, m.modified].map(q).join(',')));
+            }
+        });
+        const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'number_search_results.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+    });
+
+    searchBtn.addEventListener('click', async () => {
+        const numbers = input.value;
+        if (!numbers.trim()) { alert('Please enter some numbers to search!'); return; }
+
+        searchBtn.disabled = true;
+        searchText.textContent = 'Searching database...';
+        try {
+            const data = await post(urls.search, { numbers });
+            lastResults = data.results;
+            currentFilter = 'all';
+            document.querySelectorAll('.filter-btn').forEach((b) => b.classList.toggle('active', b.dataset.filter === 'all'));
+            renderSummary(data.summary);
+            render();
+            $('bulkResultContainer').style.display = 'flex';
+        } catch (e) {
+            alert('An error occurred while searching: ' + e.message);
+        } finally {
+            searchBtn.disabled = false;
+            searchText.textContent = 'Search Database';
+        }
+    });
+})();
+</script>
+{% endblock %}
