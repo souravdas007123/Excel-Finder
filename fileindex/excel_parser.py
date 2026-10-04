@@ -3,6 +3,7 @@ Excel reading logic. IMPORTANT: yahan Django import NAHI karna,
 kyunki ye file process-pool workers me alag process me chalti hai.
 """
 import re
+from importlib import import_module
 from datetime import date, datetime, time, timedelta
 
 try:
@@ -48,7 +49,7 @@ def _calamine_rows(path):
 
 def _legacy_rows(path):
     if path.lower().endswith(".xls"):
-        import xlrd
+        xlrd = import_module("xlrd")
         book = xlrd.open_workbook(path, on_demand=True)
         try:
             for sheet in book.sheets():
@@ -136,7 +137,7 @@ def read_row(path, sheet_name, row_no):
 
     if headers is None:
         if path.lower().endswith(".xls"):
-            import xlrd
+            xlrd = import_module("xlrd")
             book = xlrd.open_workbook(path, on_demand=True)
             try:
                 sh = book.sheet_by_name(sheet_name)
