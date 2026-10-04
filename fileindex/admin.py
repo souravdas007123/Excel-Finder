@@ -1,12 +1,13 @@
 import re
 
-from django.conf import settings
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied
 from django.template.response import TemplateResponse
 
+from .drives import get_scan_locations
 from .models import BulkSearch, FileIndex, NumberIndex, ScanTask
 from .scanner import MIN_DIGITS
+from .views import custom_path_allowed
 
 
 @admin.register(FileIndex)
@@ -31,8 +32,9 @@ class FileIndexAdmin(admin.ModelAdmin):
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
         extra_context["scan_locations"] = [
-            (key, loc["label"]) for key, loc in settings.SCAN_LOCATIONS.items()
+            (key, loc["label"]) for key, loc in get_scan_locations().items()
         ]
+        extra_context["allow_custom_path"] = custom_path_allowed(request.user)
         return super().changelist_view(request, extra_context=extra_context)
 
 

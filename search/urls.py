@@ -9,5 +9,8 @@ urlpatterns = [
     # Ye naya Bulk Search ka URL add kiya hai
     path('admin/bulk-search-api/', views.bulk_search_api, name='bulk_search'),
     path('admin/row-detail-api/', views.row_detail_api, name='row_detail'),
+    path('admin/browse-folders-api/', views.browse_folders_api, name='browse_folders'),
+    path('admin/extract-numbers-api/', views.extract_numbers_api, name='extract_numbers'),
+    path('admin/export-excel-api/', views.export_excel_api, name='export_excel'),
     path('admin/', admin.site.urls),
 ]

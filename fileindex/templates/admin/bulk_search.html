@@ -22,6 +22,13 @@
         <textarea id="bulkNumbers" class="input-field" placeholder="Example:&#10;9856325417&#10;8569741235"></textarea>
         <div id="numCounter" class="hint">0 numbers detected · numbers shorter than {{ min_digits }} digits are ignored · Ctrl+Enter to search</div>
 
+        <div class="upload-row">
+            <button id="uploadBtn" type="button" class="btn-secondary">Upload Excel / CSV</button>
+            <input id="fileInput" type="file" accept=".xlsx,.xlsm,.xls,.xlsb,.csv,.txt" hidden>
+            <label class="chk"><input type="checkbox" id="firstColOnly"> Read first column only</label>
+            <span id="uploadNote" class="upload-note"></span>
+        </div>
+
         <div class="action-row inline">
             <button id="bulkSearchBtn" class="btn-primary"><span id="bulkBtnText">Search Database</span></button>
             <button id="clearBtn" class="btn-secondary" type="button">Clear</button>
@@ -42,7 +49,7 @@
             </div>
             <div class="filter-group">
                 <button id="copyMissingBtn" class="tool-btn">Copy not-found numbers</button>
-                <button id="exportCsvBtn" class="tool-btn">Export CSV</button>
+                <button id="exportXlsxBtn" class="tool-btn">Export Excel report</button>
             </div>
         </div>
 
@@ -59,6 +66,9 @@
                 <tbody id="bulkResultBody"></tbody>
             </table>
         </div>
+        <div id="moreWrap" style="display: none; text-align: center; margin-top: 12px;">
+            <button id="showMoreBtn" class="tool-btn" type="button"></button>
+        </div>
     </div>
 </div>
 
@@ -70,6 +80,8 @@
     const urls = {
         search: "{% url 'bulk_search' %}",
         row: "{% url 'row_detail' %}",
+        extract: "{% url 'extract_numbers' %}",
+        exportXlsx: "{% url 'export_excel' %}",
     };
 
     async function post(url, data) {
@@ -91,7 +103,8 @@
 
     const searchBtn = $('bulkSearchBtn'), searchText = $('bulkBtnText');
     const input = $('bulkNumbers');
-    let lastResults = [], currentFilter = 'all';
+    const PAGE = 100;   // ek baar me itni rows render hoti hain (badi list par bhi page fast rahe)
+    let lastResults = [], currentFilter = 'all', shown = PAGE, lastInput = '';
 
     /* ---- live counter ---- */
     function updateCounter() {
@@ -113,6 +126,38 @@
         lastResults = [];
         $('bulkResultContainer').style.display = 'none';
         input.focus();
+    });
+
+    /* ---- upload numbers from file ---- */
+    const uploadBtn = $('uploadBtn'), fileInput = $('fileInput'), uploadNote = $('uploadNote');
+    function setNote(text, isError) {
+        uploadNote.textContent = text;
+        uploadNote.className = 'upload-note' + (isError ? ' err' : '');
+    }
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+        uploadBtn.disabled = true;
+        setNote('Reading ' + file.name + '...');
+        try {
+            const data = await post(urls.extract, { file, first_col: $('firstColOnly').checked ? '1' : '' });
+            if (!data.numbers.length) {
+                setNote('No numbers found in ' + data.file + '.', true);
+            } else {
+                const existing = input.value.trim();
+                input.value = (existing ? existing + '\n' : '') + data.numbers.join('\n');
+                updateCounter();
+                setNote(`${data.numbers.length} numbers loaded from ${data.file}` +
+                        (data.truncated ? ` (file has ${data.total}, only first ${data.max} loaded)` : '') +
+                        '. Now press Search.');
+            }
+        } catch (e) {
+            setNote('\u26A0 ' + e.message, true);
+        } finally {
+            uploadBtn.disabled = false;
+            fileInput.value = '';
+        }
     });
 
     /* ---- row detail ---- */
@@ -180,12 +225,16 @@
     }
 
     /* ---- results ---- */
+    function visibleRows() {
+        return lastResults
+            .map((item, idx) => ({ item, idx }))
+            .filter(({ item }) => currentFilter === 'all' || (currentFilter === 'found') === item.found);
+    }
+
     function render() {
         const frag = document.createDocumentFragment();
-        lastResults.forEach((item, idx) => {
-            if (currentFilter === 'found' && !item.found) return;
-            if (currentFilter === 'missing' && item.found) return;
-
+        const rows = visibleRows();
+        rows.slice(0, shown).forEach(({ item, idx }) => {
             const tr = document.createElement('tr');
             tr.insertCell().textContent = idx + 1;
             tr.insertCell().appendChild(el('b', item.number));
@@ -212,7 +261,12 @@
             frag.appendChild(tr);
         });
         $('bulkResultBody').replaceChildren(frag);
+        const remaining = rows.length - shown;
+        $('moreWrap').style.display = remaining > 0 ? 'block' : 'none';
+        $('showMoreBtn').textContent = `Show ${Math.min(PAGE, remaining)} more (${remaining} remaining)`;
     }
+
+    $('showMoreBtn').addEventListener('click', () => { shown += PAGE; render(); });
 
     function renderSummary(s) {
         const chips = $('bulkChips');
@@ -237,6 +291,7 @@
         const btn = e.target.closest('.filter-btn');
         if (!btn) return;
         currentFilter = btn.dataset.filter;
+        shown = PAGE;
         document.querySelectorAll('.filter-btn').forEach((b) => b.classList.toggle('active', b === btn));
         render();
     });
@@ -252,26 +307,35 @@
         }
     });
 
-    $('exportCsvBtn').addEventListener('click', () => {
+    $('exportXlsxBtn').addEventListener('click', async () => {
         if (!lastResults.length) return;
-        const q = (v) => '"' + String(v).replace(/"/g, '""') + '"';
-        const lines = [['Number', 'Status', 'File', 'Folder', 'Sheet', 'Row', 'Column', 'Modified'].map(q).join(',')];
-        lastResults.forEach((r) => {
-            if (!r.found) {
-                lines.push([r.number, 'Not Found', '', '', '', '', '', ''].map(q).join(','));
-            } else {
-                r.matches.forEach((m) => lines.push(
-                    [r.number, 'Found', m.file, m.folder, m.sheet, m.row, m.column, m.modified].map(q).join(',')));
+        const btn = $('exportXlsxBtn');
+        btn.disabled = true;
+        btn.textContent = 'Preparing report...';
+        try {
+            const fd = new FormData();
+            fd.append('numbers', lastInput);
+            fd.append('csrfmiddlewaretoken', csrf);
+            const res = await fetch(urls.exportXlsx, { method: 'POST', body: fd });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Export failed (' + res.status + ')');
             }
-        });
-        const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'number_search_results.csv';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(a.href);
+            const blob = await res.blob();
+            const match = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = match ? match[1] : 'number_search_report.xlsx';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(a.href);
+        } catch (e) {
+            alert('Could not create the report: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Export Excel report';
+        }
     });
 
     searchBtn.addEventListener('click', async () => {
@@ -283,6 +347,8 @@
         try {
             const data = await post(urls.search, { numbers });
             lastResults = data.results;
+            lastInput = numbers;
+            shown = PAGE;
             currentFilter = 'all';
             document.querySelectorAll('.filter-btn').forEach((b) => b.classList.toggle('active', b.dataset.filter === 'all'));
             renderSummary(data.summary);

@@ -1,30 +1,57 @@
 import os
 import re
+import string
+import tempfile
 import threading
 from collections import Counter, defaultdict
 from datetime import datetime
 
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl.utils import get_column_letter
 
+from .drives import get_scan_locations
+from .excel_parser import extract_numbers, parse_file
 from .models import FileIndex, NumberIndex, ScanTask
-from .scanner import MIN_DIGITS, read_row, run_scan, scan_lock
+from .report import build_report
+from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, read_row, run_scan, scan_lock
 
-MAX_NUMBERS = 500          # ek baar me max numbers
-MAX_HITS_PER_NUMBER = 25   # response chhota rakhne ke liye
+MAX_NUMBERS = 2000          # ek baar me max numbers
+CHUNK = 500                 # DB query ek baar me itne numbers ki (SQLite limit se safe)
+MAX_HITS_PER_NUMBER = 25    # screen par har number ke max matches
+MAX_HITS_LARGE = 5          # badi list (LARGE_BATCH se zyada numbers) me screen response chhota rakhne ke liye
+LARGE_BATCH = 200
+EXPORT_MAX_HITS = 500       # Excel report me har number ke max matches
 MAX_DETAIL_CELLS = 100
+MAX_UPLOAD_MB = 25
+XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+# ------------------------------------------------------------------ scan
+def custom_path_allowed(user):
+    """Specific folder scan sirf superuser ke liye. Band karna ho: settings me SCAN_ALLOW_CUSTOM_PATHS = False"""
+    return bool(getattr(settings, "SCAN_ALLOW_CUSTOM_PATHS", True) and user.is_superuser)
 
 
 @staff_member_required
 @require_POST
 def start_scan_api(request):
-    # Client sirf key bhejta hai, asli path server ke settings se aata hai (security)
-    location = settings.SCAN_LOCATIONS.get(request.POST.get("location", ""))
-    if not location:
-        return JsonResponse({"error": "Invalid location"}, status=400)
+    key = request.POST.get("location", "")
+    if key == "__custom__":
+        if not custom_path_allowed(request.user):
+            return JsonResponse({"error": "Specific folder scan is not allowed for your account"}, status=403)
+        raw = request.POST.get("custom_path", "").strip().strip('"')
+        root = os.path.normpath(raw) if raw else ""
+        if not root or not os.path.isdir(root):
+            return JsonResponse({"error": "Folder not found. Please check the path."}, status=400)
+    else:
+        # Client sirf key bhejta hai, asli path server detect karta hai (security)
+        location = get_scan_locations().get(key)
+        if not location:
+            return JsonResponse({"error": "Invalid location"}, status=400)
+        root = str(location["path"])
 
     if not scan_lock.acquire(blocking=False):
         return JsonResponse({"error": "A scan is already running"}, status=409)
@@ -33,7 +60,7 @@ def start_scan_api(request):
         # Lock free hai, matlab koi purana 'Running' task server restart se atak gaya tha
         ScanTask.objects.filter(status="Running").update(status="Error", message="Interrupted")
         task = ScanTask.objects.create(status="Running")
-        threading.Thread(target=run_scan, args=(task.id, str(location["path"])), daemon=True).start()
+        threading.Thread(target=run_scan, args=(task.id, root), daemon=True).start()
     except Exception:
         scan_lock.release()
         raise
@@ -56,6 +83,45 @@ def check_scan_status(request, task_id):
     })
 
 
+@staff_member_required
+@require_GET
+def browse_folders_api(request):
+    """Folder picker ke liye: diye gaye path ke andar ke sub-folders ki list."""
+    if not custom_path_allowed(request.user):
+        return JsonResponse({"error": "Not allowed"}, status=403)
+
+    path = request.GET.get("path", "").strip()
+    if not path:
+        if os.name == "nt":   # Windows: drives ki list
+            drives = [f"{c}:\\" for c in string.ascii_uppercase if os.path.exists(f"{c}:\\")]
+            return JsonResponse({"path": "", "parent": None,
+                                 "folders": [{"name": d, "path": d} for d in drives]})
+        path = os.sep
+
+    path = os.path.normpath(path)
+    if not os.path.isdir(path):
+        return JsonResponse({"error": "Folder not found"}, status=400)
+
+    folders = []
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    if entry.is_dir(follow_symlinks=False) and not entry.name.startswith(("$", ".")):
+                        folders.append({"name": entry.name, "path": entry.path})
+                except OSError:
+                    continue
+    except PermissionError:
+        return JsonResponse({"error": "Permission denied for this folder"}, status=403)
+
+    folders.sort(key=lambda f: f["name"].lower())
+    parent = os.path.dirname(path)
+    if parent == path:   # root par hain: Windows me drive list, Linux me upar kuch nahi
+        parent = "" if os.name == "nt" else None
+    return JsonResponse({"path": path, "parent": parent, "folders": folders[:1000]})
+
+
+# ------------------------------------------------------------------ search
 def _parse_numbers(raw):
     """(valid numbers, skipped entries, duplicate count)"""
     numbers, seen, skipped, duplicates = [], set(), [], 0
@@ -74,46 +140,52 @@ def _parse_numbers(raw):
     return numbers, skipped, duplicates
 
 
+def _lookup_chunks(numbers, max_hits):
+    """500-500 numbers ka indexed lookup. Har chunk ke liye (numbers, matches, totals, files) yield karta hai."""
+    for i in range(0, len(numbers), CHUNK):
+        chunk = numbers[i:i + CHUNK]
+        rows = NumberIndex.objects.filter(number__in=chunk).values_list(
+            "number", "file_id", "file__file_name", "file__file_path", "file__file_mtime", "sheet", "row", "col"
+        )
+        matches, totals, files = defaultdict(list), Counter(), defaultdict(set)
+        for number, file_id, name, path, mtime, sheet, row, col in rows.iterator():
+            totals[number] += 1
+            files[number].add(file_id)
+            if len(matches[number]) < max_hits:
+                matches[number].append({
+                    "file_id": file_id,
+                    "file": name,
+                    "folder": os.path.dirname(path),
+                    "sheet": sheet,
+                    "row": row,
+                    "col": col,
+                    "column": get_column_letter(col) if col else "",
+                    "modified": datetime.fromtimestamp(mtime).strftime("%d %b %Y, %H:%M") if mtime else "",
+                })
+        for lst in matches.values():   # DB me ORDER BY nahi, chhoti list Python me sort (tez)
+            lst.sort(key=lambda m: (m["file"].lower(), m["sheet"], m["row"], m["col"]))
+        yield chunk, matches, totals, files
+
+
 @staff_member_required
 @require_POST
 def bulk_search_api(request):
     numbers, skipped, duplicates = _parse_numbers(request.POST.get("numbers", ""))
     truncated = len(numbers) > MAX_NUMBERS
     numbers = numbers[:MAX_NUMBERS]
+    max_hits = MAX_HITS_PER_NUMBER if len(numbers) <= LARGE_BATCH else MAX_HITS_LARGE
 
-    # Ek hi indexed query saare numbers ke liye
-    rows = (
-        NumberIndex.objects.filter(number__in=numbers)
-        .order_by("file__file_name", "sheet", "row", "col")
-        .values_list("number", "file_id", "file__file_name", "file__file_path",
-                     "file__file_mtime", "sheet", "row", "col")
-    )
-    matches, totals, files = defaultdict(list), Counter(), defaultdict(set)
-    for number, file_id, name, path, mtime, sheet, row, col in rows.iterator():
-        totals[number] += 1
-        files[number].add(file_id)
-        if len(matches[number]) < MAX_HITS_PER_NUMBER:
-            matches[number].append({
-                "file_id": file_id,
-                "file": name,
-                "folder": os.path.dirname(path),
-                "sheet": sheet,
-                "row": row,
-                "col": col,
-                "column": get_column_letter(col) if col else "",
-                "modified": datetime.fromtimestamp(mtime).strftime("%d %b %Y, %H:%M") if mtime else "",
+    results = []
+    for chunk, matches, totals, files in _lookup_chunks(numbers, max_hits):
+        for n in chunk:
+            results.append({
+                "number": n,
+                "found": totals[n] > 0,
+                "total": totals[n],           # kul kitni jagah mila
+                "file_count": len(files[n]),  # kitni alag files me
+                "matches": matches[n],
             })
 
-    results = [
-        {
-            "number": n,
-            "found": totals[n] > 0,
-            "total": totals[n],          # kul kitni jagah mila
-            "file_count": len(files[n]), # kitni alag files me
-            "matches": matches[n],
-        }
-        for n in numbers
-    ]
     found = sum(1 for r in results if r["found"])
     return JsonResponse({
         "status": "success",
@@ -160,3 +232,82 @@ def row_detail_api(request):
         if h or v:
             cells.append({"col": get_column_letter(i + 1), "header": h, "value": v, "hit": (i + 1) == col})
     return JsonResponse({"cells": cells})
+
+
+# ------------------------------------------------------------------ upload numbers from file
+def _numbers_from_text(upload, first_col):
+    raw = upload.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    found = []
+    for line in text.splitlines():
+        parts = re.split(r"[,;\t]", line)
+        for part in (parts[:1] if first_col else parts):
+            found.extend(extract_numbers(part.strip().strip('"\''), MIN_DIGITS))   # CSV ke quotes hatao
+    return found
+
+
+def _numbers_from_excel(upload, ext, first_col):
+    fd, tmp = tempfile.mkstemp(suffix=ext)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            for chunk in upload.chunks():
+                f.write(chunk)
+        hits = parse_file(tmp, MIN_DIGITS)   # scanner wala hi fast reader (calamine / openpyxl)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    if first_col:
+        hits = [h for h in hits if h[3] == 1]
+    hits.sort(key=lambda h: (h[1], h[2], h[3]))   # sheet, row, column ke order me
+    return [h[0] for h in hits]
+
+
+@staff_member_required
+@require_POST
+def extract_numbers_api(request):
+    """Uploaded Excel/CSV/TXT se numbers nikal kar deta hai (search yahan nahi chalta)."""
+    upload = request.FILES.get("file")
+    if not upload:
+        return JsonResponse({"error": "No file received"}, status=400)
+    if upload.size > MAX_UPLOAD_MB * 1024 * 1024:
+        return JsonResponse({"error": f"File is too large (max {MAX_UPLOAD_MB} MB)"}, status=413)
+
+    ext = os.path.splitext(upload.name)[1].lower()
+    first_col = bool(request.POST.get("first_col"))
+    try:
+        if ext in (".csv", ".txt"):
+            found = _numbers_from_text(upload, first_col)
+        elif ext in EXCEL_EXTENSIONS:
+            found = _numbers_from_excel(upload, ext, first_col)
+        else:
+            return JsonResponse({"error": "Unsupported file. Use .xlsx, .xls, .csv or .txt"}, status=400)
+    except Exception as exc:
+        return JsonResponse({"error": f"Could not read file: {exc}"}, status=400)
+
+    unique = list(dict.fromkeys(found))   # order maintain, duplicates hatao
+    return JsonResponse({
+        "file": upload.name,
+        "numbers": unique[:MAX_NUMBERS],
+        "total": len(unique),
+        "truncated": len(unique) > MAX_NUMBERS,
+        "max": MAX_NUMBERS,
+    })
+
+
+# ------------------------------------------------------------------ Excel report
+@staff_member_required
+@require_POST
+def export_excel_api(request):
+    numbers, skipped, duplicates = _parse_numbers(request.POST.get("numbers", ""))
+    numbers = numbers[:MAX_NUMBERS]
+    data = build_report(_lookup_chunks(numbers, EXPORT_MAX_HITS), len(numbers), skipped, duplicates, EXPORT_MAX_HITS)
+
+    filename = datetime.now().strftime("number_search_report_%Y%m%d_%H%M.xlsx")
+    response = HttpResponse(data, content_type=XLSX_TYPE)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response

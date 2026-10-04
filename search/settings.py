@@ -128,10 +128,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 SCAN_LOCATIONS = {
     'c': {'label': 'C: Drive', 'path': 'C:\\'},
     'd': {'label': 'D: Drive', 'path': 'D:\\'},
-    'excel': {
-        'label': 'Specific Folder (newfolder/upload/excel)',
-        'path': BASE_DIR / 'newfolder' / 'upload' / 'excel',
-    },
 }
 
 SCAN_MIN_DIGITS = 5
@@ -141,3 +137,5 @@ SCAN_SKIP_DIRS = (
     'Program Files (x86)', 'ProgramData', 'AppData', 'node_modules', '.git',
     '__pycache__', 'venv', '.venv',
 )
+
+SCAN_WORKERS = 2 

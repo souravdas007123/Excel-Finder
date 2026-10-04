@@ -15,6 +15,19 @@
         display: block !important;
     }
     .scanner-wrap { max-width: 760px; padding: 10px 0; }
+
+    /* Folder picker */
+    .path-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .path-row .input-field { margin-bottom: 0; flex: 1; }
+    .folder-browser { border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px; margin-bottom: 18px; }
+    .fb-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border-color, #e0e0e0); font-size: 13px; }
+    .fb-path { font-weight: 600; word-break: break-all; flex: 1; }
+    .fb-list { max-height: 240px; overflow: auto; }
+    .fb-item { padding: 8px 12px; cursor: pointer; font-size: 14px; border-bottom: 1px solid var(--border-color, #f0f0f0); word-break: break-all; }
+    .fb-item:hover { background: rgba(65, 118, 144, 0.12); }
+    .fb-empty { padding: 12px; font-size: 13px; color: var(--body-quiet-color, #888); }
+    .fb-foot { padding: 10px; border-top: 1px solid var(--border-color, #e0e0e0); display: flex; gap: 10px; align-items: center; }
+    .fb-foot .btn-primary { width: auto; padding: 8px 18px; }
 </style>
 
 <div class="custom-tools-wrapper">
@@ -31,7 +44,32 @@
                 {% for key, label in scan_locations %}
                 <option value="{{ key }}">{{ label }}</option>
                 {% endfor %}
+                {% if allow_custom_path %}
+                <option value="__custom__">Specific folder (browse)...</option>
+                {% endif %}
             </select>
+
+            {% if allow_custom_path %}
+            <div id="customBox" style="display: none;">
+                <label class="field-label">Folder path</label>
+                <div class="path-row">
+                    <input id="customPath" class="input-field" type="text" placeholder="Example: D:\Data\Excel Files">
+                    <button id="browseBtn" type="button" class="btn-secondary">Browse</button>
+                </div>
+
+                <div id="folderBrowser" class="folder-browser" style="display: none;">
+                    <div class="fb-head">
+                        <button id="fbUp" type="button" class="tool-btn">&uarr; Up</button>
+                        <span id="fbPath" class="fb-path"></span>
+                    </div>
+                    <div id="fbList" class="fb-list"></div>
+                    <div class="fb-foot">
+                        <button id="fbUse" type="button" class="btn-primary">Use this folder</button>
+                        <span class="hint" style="margin: 0;">Click a folder to open it, then press "Use this folder".</span>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
 
             <div class="action-row">
                 <button id="scanBtn" class="btn-primary"><span id="btnText">Start Background Scan</span></button>
@@ -50,6 +88,7 @@
     const urls = {
         start: "{% url 'start_scan' %}",
         check: "{% url 'check_scan' 0 %}",
+        browse: "{% url 'browse_folders' %}",
     };
 
     async function post(url, data) {
@@ -63,6 +102,7 @@
     }
 
     const scanBtn = $('scanBtn'), btnText = $('btnText'), statusEl = $('scanStatus');
+    const select = $('driveSelect');
 
     function setStatus(text, color) {
         statusEl.textContent = text;
@@ -74,6 +114,63 @@
         btnText.textContent = 'Start Background Scan';
     }
 
+    /* ---------- FOLDER PICKER ---------- */
+    const customBox = $('customBox');
+    if (customBox) {
+        const browser = $('folderBrowser'), fbList = $('fbList'), fbPath = $('fbPath');
+        let currentPath = '', parentPath = null;
+
+        select.addEventListener('change', () => {
+            customBox.style.display = select.value === '__custom__' ? 'block' : 'none';
+        });
+
+        async function loadFolders(path) {
+            fbList.textContent = 'Loading...';
+            try {
+                const res = await fetch(urls.browse + '?path=' + encodeURIComponent(path));
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Could not open folder');
+
+                currentPath = data.path;
+                parentPath = data.parent;
+                fbPath.textContent = currentPath || 'This PC (select a drive)';
+                $('fbUp').disabled = parentPath === null;
+                $('fbUse').disabled = !currentPath;
+
+                const frag = document.createDocumentFragment();
+                data.folders.forEach((f) => {
+                    const item = document.createElement('div');
+                    item.className = 'fb-item';
+                    item.textContent = '\uD83D\uDCC1 ' + f.name;
+                    item.title = f.path;
+                    item.addEventListener('click', () => loadFolders(f.path));
+                    frag.appendChild(item);
+                });
+                if (!data.folders.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'fb-empty';
+                    empty.textContent = 'No sub-folders here. You can still use this folder.';
+                    frag.appendChild(empty);
+                }
+                fbList.replaceChildren(frag);
+            } catch (e) {
+                fbList.textContent = '\u26A0 ' + e.message;
+            }
+        }
+
+        $('browseBtn').addEventListener('click', () => {
+            browser.style.display = 'block';
+            loadFolders($('customPath').value.trim());
+        });
+        $('fbUp').addEventListener('click', () => { if (parentPath !== null) loadFolders(parentPath); });
+        $('fbUse').addEventListener('click', () => {
+            if (!currentPath) return;
+            $('customPath').value = currentPath;
+            browser.style.display = 'none';
+        });
+    }
+
+    /* ---------- SCANNER ---------- */
     function poll(taskId) {
         const url = urls.check.replace('/0/', '/' + taskId + '/');
         const timer = setInterval(async () => {
@@ -98,14 +195,21 @@
     }
 
     scanBtn.addEventListener('click', async () => {
-        const location = $('driveSelect').value;
+        const location = select.value;
         if (!location) { alert('Please select a drive or folder first!'); return; }
+
+        const payload = { location };
+        if (location === '__custom__') {
+            const p = $('customPath').value.trim();
+            if (!p) { alert('Please type or browse a folder path first!'); return; }
+            payload.custom_path = p;
+        }
 
         scanBtn.disabled = true;
         btnText.textContent = 'Scanning in background...';
         setStatus('Starting scan...', '#f29000');
         try {
-            const data = await post(urls.start, { location });
+            const data = await post(urls.start, payload);
             poll(data.task_id);
         } catch (e) {
             resetScanBtn();
