@@ -10,12 +10,19 @@
 {% block content %}
 {% include "admin/_fileindex_styles.html" %}
 
+{% if not has_index %}
+<div class="banner-warn">
+    <b>Nothing is indexed yet.</b>
+    Do <a href="{% url 'admin:fileindex_fileindex_changelist' %}">Step 1 &middot; Scan Your Files</a> first, then come back here to search.
+</div>
+{% endif %}
+
 <div class="custom-tools-wrapper">
     <!-- INPUT -->
     <div class="premium-card">
         <div class="card-header">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-            Bulk Number Search
+            Step 2 &middot; Bulk Number Search
         </div>
 
         <label class="field-label" for="bulkNumbers">Enter Numbers (comma separated or one per line)</label>
@@ -26,7 +33,7 @@
             <button id="uploadBtn" type="button" class="btn-secondary">Upload Excel / CSV</button>
             <input id="fileInput" type="file" accept=".xlsx,.xlsm,.xls,.xlsb,.csv,.txt" hidden>
             <label class="chk"><input type="checkbox" id="firstColOnly"> Read first column only</label>
-            <span id="uploadNote" class="upload-note"></span>
+            <span id="uploadNote" class="upload-note">Files with more than {{ max_numbers }} numbers give a full Excel report.</span>
         </div>
 
         <div class="action-row inline">
@@ -82,6 +89,7 @@
         row: "{% url 'row_detail' %}",
         extract: "{% url 'extract_numbers' %}",
         exportXlsx: "{% url 'export_excel' %}",
+        fileReport: "{% url 'file_report' %}",
     };
 
     async function post(url, data) {
@@ -99,6 +107,18 @@
         if (text !== undefined) e.textContent = text;   // textContent => XSS safe
         if (className) e.className = className;
         return e;
+    }
+
+    async function saveResponse(res, fallbackName) {
+        const blob = await res.blob();
+        const match = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = match ? match[1] : fallbackName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
     }
 
     const searchBtn = $('bulkSearchBtn'), searchText = $('bulkBtnText');
@@ -134,6 +154,19 @@
         uploadNote.textContent = text;
         uploadNote.className = 'upload-note' + (isError ? ' err' : '');
     }
+    async function downloadFileReport(file) {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('first_col', $('firstColOnly').checked ? '1' : '');
+        fd.append('csrfmiddlewaretoken', csrf);
+        const res = await fetch(urls.fileReport, { method: 'POST', body: fd });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Report failed (' + res.status + ')');
+        }
+        await saveResponse(res, 'number_search_report.xlsx');
+    }
+
     uploadBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', async () => {
         const file = fileInput.files[0];
@@ -144,6 +177,13 @@
             const data = await post(urls.extract, { file, first_col: $('firstColOnly').checked ? '1' : '' });
             if (!data.numbers.length) {
                 setNote('No numbers found in ' + data.file + '.', true);
+            } else if (data.truncated && confirm(
+                    `This file has ${data.total} numbers, but the screen can show only ${data.max} at a time.\n\n` +
+                    `OK = download a full Excel report for ALL ${data.total} numbers (recommended)\n` +
+                    `Cancel = load only the first ${data.max} numbers on screen`)) {
+                setNote(`Building the full report for ${data.total} numbers... this can take a while for very large files.`);
+                await downloadFileReport(file);
+                setNote(`Full report downloaded for ${data.total} numbers from ${data.file}.`);
             } else {
                 const existing = input.value.trim();
                 input.value = (existing ? existing + '\n' : '') + data.numbers.join('\n');
@@ -321,15 +361,7 @@
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.error || 'Export failed (' + res.status + ')');
             }
-            const blob = await res.blob();
-            const match = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = match ? match[1] : 'number_search_report.xlsx';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(a.href);
+            await saveResponse(res, 'number_search_report.xlsx');
         } catch (e) {
             alert('Could not create the report: ' + e.message);
         } finally {

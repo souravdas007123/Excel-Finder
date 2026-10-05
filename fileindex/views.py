@@ -8,7 +8,9 @@ from datetime import datetime
 
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
+from django.db import connection, transaction
 from django.http import HttpResponse, JsonResponse
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl.utils import get_column_letter
 
@@ -24,6 +26,8 @@ MAX_HITS_PER_NUMBER = 25    # screen par har number ke max matches
 MAX_HITS_LARGE = 5          # badi list (LARGE_BATCH se zyada numbers) me screen response chhota rakhne ke liye
 LARGE_BATCH = 200
 EXPORT_MAX_HITS = 500       # Excel report me har number ke max matches
+MAX_FILE_NUMBERS = 500_000  # upload file se full report me max numbers
+EXPORT_MAX_HITS_HUGE = 50   # MAX_NUMBERS se badi file ki report me har number ke max matches (report chhoti rahe)
 MAX_DETAIL_CELLS = 100
 MAX_UPLOAD_MB = 25
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -54,7 +58,7 @@ def start_scan_api(request):
         root = str(location["path"])
 
     if not scan_lock.acquire(blocking=False):
-        return JsonResponse({"error": "A scan is already running"}, status=409)
+        return JsonResponse({"error": "Another scan or clear operation is already in progress. Please wait."}, status=409)
 
     try:
         # Lock free hai, matlab koi purana 'Running' task server restart se atak gaya tha
@@ -80,6 +84,7 @@ def check_scan_status(request, task_id):
         "files_skipped": task.files_skipped,
         "files_failed": task.files_failed,
         "message": task.message,
+        "elapsed": int((timezone.now() - task.created_at).total_seconds()),
     })
 
 
@@ -267,15 +272,13 @@ def _numbers_from_excel(upload, ext, first_col):
     return [h[0] for h in hits]
 
 
-@staff_member_required
-@require_POST
-def extract_numbers_api(request):
-    """Uploaded Excel/CSV/TXT se numbers nikal kar deta hai (search yahan nahi chalta)."""
+def _read_upload(request):
+    """Upload se numbers nikalta hai. Returns ((file name, unique numbers, duplicates), None) ya (None, error response)."""
     upload = request.FILES.get("file")
     if not upload:
-        return JsonResponse({"error": "No file received"}, status=400)
+        return None, JsonResponse({"error": "No file received"}, status=400)
     if upload.size > MAX_UPLOAD_MB * 1024 * 1024:
-        return JsonResponse({"error": f"File is too large (max {MAX_UPLOAD_MB} MB)"}, status=413)
+        return None, JsonResponse({"error": f"File is too large (max {MAX_UPLOAD_MB} MB)"}, status=413)
 
     ext = os.path.splitext(upload.name)[1].lower()
     first_col = bool(request.POST.get("first_col"))
@@ -285,18 +288,53 @@ def extract_numbers_api(request):
         elif ext in EXCEL_EXTENSIONS:
             found = _numbers_from_excel(upload, ext, first_col)
         else:
-            return JsonResponse({"error": "Unsupported file. Use .xlsx, .xls, .csv or .txt"}, status=400)
+            return None, JsonResponse({"error": "Unsupported file. Use .xlsx, .xls, .csv or .txt"}, status=400)
     except Exception as exc:
-        return JsonResponse({"error": f"Could not read file: {exc}"}, status=400)
+        return None, JsonResponse({"error": f"Could not read file: {exc}"}, status=400)
 
     unique = list(dict.fromkeys(found))   # order maintain, duplicates hatao
+    return (upload.name, unique, len(found) - len(unique)), None
+
+
+@staff_member_required
+@require_POST
+def extract_numbers_api(request):
+    """Uploaded file se numbers nikal kar deta hai (screen par dikhane ke liye, max MAX_NUMBERS)."""
+    result, error = _read_upload(request)
+    if error:
+        return error
+    name, unique, _ = result
     return JsonResponse({
-        "file": upload.name,
+        "file": name,
         "numbers": unique[:MAX_NUMBERS],
         "total": len(unique),
         "truncated": len(unique) > MAX_NUMBERS,
         "max": MAX_NUMBERS,
     })
+
+
+def _xlsx_response(data):
+    filename = datetime.now().strftime("number_search_report_%Y%m%d_%H%M.xlsx")
+    response = HttpResponse(data, content_type=XLSX_TYPE)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@staff_member_required
+@require_POST
+def file_report_api(request):
+    """Badi file ke SAARE numbers search karke seedha Excel report deta hai (screen limit ke bina)."""
+    result, error = _read_upload(request)
+    if error:
+        return error
+    _name, numbers, duplicates = result
+    if not numbers:
+        return JsonResponse({"error": "No numbers found in the file"}, status=400)
+
+    numbers = numbers[:MAX_FILE_NUMBERS]
+    max_hits = EXPORT_MAX_HITS if len(numbers) <= MAX_NUMBERS else EXPORT_MAX_HITS_HUGE
+    data = build_report(_lookup_chunks(numbers, max_hits), len(numbers), [], duplicates, max_hits)
+    return _xlsx_response(data)
 
 
 # ------------------------------------------------------------------ Excel report
@@ -306,8 +344,29 @@ def export_excel_api(request):
     numbers, skipped, duplicates = _parse_numbers(request.POST.get("numbers", ""))
     numbers = numbers[:MAX_NUMBERS]
     data = build_report(_lookup_chunks(numbers, EXPORT_MAX_HITS), len(numbers), skipped, duplicates, EXPORT_MAX_HITS)
+    return _xlsx_response(data)
 
-    filename = datetime.now().strftime("number_search_report_%Y%m%d_%H%M.xlsx")
-    response = HttpResponse(data, content_type=XLSX_TYPE)
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return response
+
+@staff_member_required
+@require_POST
+def clear_index_api(request):
+    """Poora index (files + numbers) ek jhatke me hatata hai. Disk ki Excel files ko haath nahi lagata."""
+    if not request.user.has_perm("fileindex.delete_fileindex"):
+        return JsonResponse({"error": "You do not have permission to clear the index"}, status=403)
+    if not scan_lock.acquire(blocking=False):   # lock pakda rehta hai, isliye clear ke dauraan naya scan shuru nahi hoga
+        return JsonResponse({"error": "A scan is running. Please wait for it to finish."}, status=409)
+    try:
+        files_removed = FileIndex.objects.count()
+        qn = connection.ops.quote_name
+        with transaction.atomic(), connection.cursor() as cur:
+            # Raw DELETE: Django ke .delete() se bahut tez (10 lakh rows < 1 second)
+            cur.execute(f"DELETE FROM {qn(NumberIndex._meta.db_table)}")
+            cur.execute(f"DELETE FROM {qn(FileIndex._meta.db_table)}")
+        if connection.vendor == "sqlite":
+            try:
+                connection.cursor().execute("VACUUM")   # database file ka size bhi chhota ho jata hai
+            except Exception:
+                pass
+    finally:
+        scan_lock.release()
+    return JsonResponse({"status": "cleared", "files_removed": files_removed})
