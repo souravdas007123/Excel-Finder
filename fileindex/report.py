@@ -16,6 +16,7 @@ HEADER_FILL = PatternFill("solid", fgColor="417690")
 FOUND_COLUMNS = [("Number", 18), ("File", 38), ("Folder", 55), ("Sheet", 18),
                  ("Row", 8), ("Column", 9), ("File Modified", 20)]
 MISSING_COLUMNS = [("Number", 20)]
+FILE_COLUMNS = [("File", 40), ("Folder", 55), ("Numbers Found", 15), ("Total Matches", 15), ("File Modified", 20)]
 EXCEL_MAX_DATA_ROWS = 1_000_000
 
 
@@ -40,15 +41,17 @@ def _prepare(ws, columns):
     ws.append(header)
 
 
-def build_report(chunks, searched, skipped, duplicates, max_hits):
+def build_report(chunks, searched, skipped, duplicates, max_hits, file_stats=None):
     """chunks: iterable of (numbers, matches, totals, files). Returns .xlsx file ke bytes."""
     wb = Workbook(write_only=True)
     ws_sum = wb.create_sheet("Summary")
+    ws_files = wb.create_sheet("By File")
     ws_found = wb.create_sheet("Found")
     ws_missing = wb.create_sheet("Not Found")
 
     ws_sum.column_dimensions["A"].width = 52
     ws_sum.column_dimensions["B"].width = 28
+    _prepare(ws_files, FILE_COLUMNS)
     _prepare(ws_found, FOUND_COLUMNS)
     _prepare(ws_missing, MISSING_COLUMNS)
 
@@ -71,6 +74,11 @@ def build_report(chunks, searched, skipped, duplicates, max_hits):
                 ws_missing.append([n])
                 missing += 1
 
+    file_rows = 0   # By File sheet: kis file me kitne numbers mile (chunks khatam hone ke baad poora count pata hota hai)
+    for fs in sorted((file_stats or {}).values(), key=lambda f: (-f["numbers_count"], f["file"].lower())):
+        ws_files.append([fs["file"], fs["folder"], fs["numbers_count"], fs["matches"], fs["modified"]])
+        file_rows += 1
+    ws_files.auto_filter.ref = f"A1:{get_column_letter(len(FILE_COLUMNS))}{file_rows + 1}"
     ws_found.auto_filter.ref = f"A1:{get_column_letter(len(FOUND_COLUMNS))}{found_rows + 1}"
     ws_missing.auto_filter.ref = f"A1:A{missing + 1}"
 
@@ -81,6 +89,7 @@ def build_report(chunks, searched, skipped, duplicates, max_hits):
         ("Numbers searched", searched),
         ("Found", found),
         ("Not found", missing),
+        ("Files containing matches", file_rows),
         ("Duplicates removed", duplicates),
         ("Ignored entries (too short)", len(skipped)),
     ]

@@ -20,7 +20,12 @@ from .models import FileIndex, NumberIndex, ScanTask
 from .report import build_report
 from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, read_row, run_scan, scan_lock
 
-MAX_NUMBERS = 2000          # ek baar me max numbers
+MAX_NUMBERS = 100_000       # ek baar me screen par max numbers (file-wise summary chhoti rehti hai)
+DETAIL_LIMIT = 2000         # isse zyada numbers par per-number detail nahi bhejte (page tez rahe)
+FILES_LIMIT = 1000          # By File view me max files
+FILE_LIST_CAP = 200         # har file ke liye max itne numbers ki list bhejte hain (count hamesha poora)
+FILE_DETAIL_PAGE = 100      # 'View details' ek baar me itne numbers ki jagah laata hai
+MAX_LOCATIONS_PER_NUMBER = 20
 CHUNK = 500                 # DB query ek baar me itne numbers ki (SQLite limit se safe)
 MAX_HITS_PER_NUMBER = 25    # screen par har number ke max matches
 MAX_HITS_LARGE = 5          # badi list (LARGE_BATCH se zyada numbers) me screen response chhota rakhne ke liye
@@ -145,28 +150,53 @@ def _parse_numbers(raw):
     return numbers, skipped, duplicates
 
 
-def _lookup_chunks(numbers, max_hits):
-    """500-500 numbers ka indexed lookup. Har chunk ke liye (numbers, matches, totals, files) yield karta hai."""
+def _fmt_mtime(mtime):
+    return datetime.fromtimestamp(mtime).strftime("%d %b %Y, %H:%M") if mtime else ""
+
+
+def _lookup_chunks(numbers, max_hits, file_stats=None):
+    """500-500 numbers ka indexed lookup. Har chunk ke liye (numbers, matches, totals, files) yield karta hai.
+
+    max_hits=0 : per-number matches nahi banate (badi list me tez).
+    file_stats : dict diya ho toh file-wise summary bharta hai:
+                 {file_id: {file, folder, modified, numbers_count, matches, numbers[:FILE_LIST_CAP]}}
+    """
     for i in range(0, len(numbers), CHUNK):
         chunk = numbers[i:i + CHUNK]
         rows = NumberIndex.objects.filter(number__in=chunk).values_list(
             "number", "file_id", "file__file_name", "file__file_path", "file__file_mtime", "sheet", "row", "col"
         )
         matches, totals, files = defaultdict(list), Counter(), defaultdict(set)
+        seen_pairs = set()   # (file, number): ek number ek file me kitni bhi baar ho, count 1 baar
         for number, file_id, name, path, mtime, sheet, row, col in rows.iterator():
             totals[number] += 1
-            files[number].add(file_id)
-            if len(matches[number]) < max_hits:
-                matches[number].append({
-                    "file_id": file_id,
-                    "file": name,
-                    "folder": os.path.dirname(path),
-                    "sheet": sheet,
-                    "row": row,
-                    "col": col,
-                    "column": get_column_letter(col) if col else "",
-                    "modified": datetime.fromtimestamp(mtime).strftime("%d %b %Y, %H:%M") if mtime else "",
-                })
+            if max_hits:
+                files[number].add(file_id)
+                if len(matches[number]) < max_hits:
+                    matches[number].append({
+                        "file_id": file_id,
+                        "file": name,
+                        "folder": os.path.dirname(path),
+                        "sheet": sheet,
+                        "row": row,
+                        "col": col,
+                        "column": get_column_letter(col) if col else "",
+                        "modified": _fmt_mtime(mtime),
+                    })
+            if file_stats is not None:
+                fs = file_stats.get(file_id)
+                if fs is None:
+                    fs = file_stats[file_id] = {
+                        "file_id": file_id, "file": name, "folder": os.path.dirname(path),
+                        "modified": _fmt_mtime(mtime), "numbers_count": 0, "matches": 0, "numbers": [],
+                    }
+                fs["matches"] += 1
+                pair = (file_id, number)
+                if pair not in seen_pairs:
+                    seen_pairs.add(pair)
+                    fs["numbers_count"] += 1
+                    if len(fs["numbers"]) < FILE_LIST_CAP:
+                        fs["numbers"].append(number)
         for lst in matches.values():   # DB me ORDER BY nahi, chhoti list Python me sort (tez)
             lst.sort(key=lambda m: (m["file"].lower(), m["sheet"], m["row"], m["col"]))
         yield chunk, matches, totals, files
@@ -178,34 +208,71 @@ def bulk_search_api(request):
     numbers, skipped, duplicates = _parse_numbers(request.POST.get("numbers", ""))
     truncated = len(numbers) > MAX_NUMBERS
     numbers = numbers[:MAX_NUMBERS]
-    max_hits = MAX_HITS_PER_NUMBER if len(numbers) <= LARGE_BATCH else MAX_HITS_LARGE
+    detail = len(numbers) <= DETAIL_LIMIT   # per-number details sirf chhoti list ke liye
+    max_hits = (MAX_HITS_PER_NUMBER if len(numbers) <= LARGE_BATCH else MAX_HITS_LARGE) if detail else 0
 
-    results = []
-    for chunk, matches, totals, files in _lookup_chunks(numbers, max_hits):
+    file_stats, results, not_found, found = {}, [], [], 0
+    for chunk, matches, totals, files in _lookup_chunks(numbers, max_hits, file_stats):
         for n in chunk:
-            results.append({
-                "number": n,
-                "found": totals[n] > 0,
-                "total": totals[n],           # kul kitni jagah mila
-                "file_count": len(files[n]),  # kitni alag files me
-                "matches": matches[n],
-            })
+            if totals[n]:
+                found += 1
+            else:
+                not_found.append(n)
+            if detail:
+                results.append({
+                    "number": n,
+                    "found": totals[n] > 0,
+                    "total": totals[n],           # kul kitni jagah mila
+                    "file_count": len(files[n]),  # kitni alag files me
+                    "matches": matches[n],
+                })
 
-    found = sum(1 for r in results if r["found"])
+    by_file = sorted(file_stats.values(), key=lambda f: (-f["numbers_count"], f["file"].lower()))
     return JsonResponse({
         "status": "success",
-        "results": results,
         "summary": {
             "searched": len(numbers),
             "found": found,
-            "not_found": len(numbers) - found,
+            "not_found": len(not_found),
+            "files": len(by_file),
             "duplicates": duplicates,
             "skipped": skipped,
             "min_digits": MIN_DIGITS,
             "truncated": truncated,
             "max_numbers": MAX_NUMBERS,
+            "detail": detail,
+            "detail_limit": DETAIL_LIMIT,
         },
+        "files": by_file[:FILES_LIMIT],
+        "results": results,
+        "not_found": not_found,
     })
+
+
+@staff_member_required
+@require_POST
+def file_locations_api(request):
+    """'View details' click par: ek file me diye gaye numbers ki jagah (sheet / row / column)."""
+    try:
+        file_id = int(request.POST.get("file_id", ""))
+    except ValueError:
+        return JsonResponse({"error": "Invalid request"}, status=400)
+    numbers, _, _ = _parse_numbers(request.POST.get("numbers", ""))
+    numbers = numbers[:FILE_DETAIL_PAGE]
+
+    rows = NumberIndex.objects.filter(file_id=file_id, number__in=numbers).values_list(
+        "number", "sheet", "row", "col")
+    by_number = defaultdict(list)
+    for number, sheet, row, col in rows:
+        if len(by_number[number]) < MAX_LOCATIONS_PER_NUMBER:
+            by_number[number].append({"sheet": sheet, "row": row, "col": col,
+                                      "column": get_column_letter(col) if col else ""})
+    items = []
+    for n in numbers:   # numbers ka order wahi jo list me tha
+        if n in by_number:
+            by_number[n].sort(key=lambda loc: (loc["sheet"], loc["row"], loc["col"]))
+            items.append({"number": n, "locations": by_number[n]})
+    return JsonResponse({"file_id": file_id, "items": items})
 
 
 @staff_member_required
@@ -332,8 +399,10 @@ def file_report_api(request):
         return JsonResponse({"error": "No numbers found in the file"}, status=400)
 
     numbers = numbers[:MAX_FILE_NUMBERS]
-    max_hits = EXPORT_MAX_HITS if len(numbers) <= MAX_NUMBERS else EXPORT_MAX_HITS_HUGE
-    data = build_report(_lookup_chunks(numbers, max_hits), len(numbers), [], duplicates, max_hits)
+    max_hits = EXPORT_MAX_HITS if len(numbers) <= DETAIL_LIMIT else EXPORT_MAX_HITS_HUGE
+    file_stats = {}
+    data = build_report(_lookup_chunks(numbers, max_hits, file_stats), len(numbers), [], duplicates,
+                        max_hits, file_stats)
     return _xlsx_response(data)
 
 
@@ -343,7 +412,10 @@ def file_report_api(request):
 def export_excel_api(request):
     numbers, skipped, duplicates = _parse_numbers(request.POST.get("numbers", ""))
     numbers = numbers[:MAX_NUMBERS]
-    data = build_report(_lookup_chunks(numbers, EXPORT_MAX_HITS), len(numbers), skipped, duplicates, EXPORT_MAX_HITS)
+    max_hits = EXPORT_MAX_HITS if len(numbers) <= DETAIL_LIMIT else EXPORT_MAX_HITS_HUGE
+    file_stats = {}
+    data = build_report(_lookup_chunks(numbers, max_hits, file_stats), len(numbers), skipped, duplicates,
+                        max_hits, file_stats)
     return _xlsx_response(data)
 
 
