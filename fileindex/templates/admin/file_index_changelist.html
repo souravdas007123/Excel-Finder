@@ -3,60 +3,121 @@
 {% block object-tools %}
 {% include "admin/_fileindex_styles.html" %}
 <style>
-    /* HIDE DJANGO'S DEFAULT TITLE ("Select file index to change") */
+    /* Django ka default title aur float hatao */
     #content > h1 { display: none !important; }
-    /* OVERRIDE DJANGO'S DEFAULT FLOAT */
     #changelist .object-tools {
-        float: none !important;
-        position: relative !important;
-        margin: 0 0 25px 0 !important;
-        padding: 0 !important;
-        width: 100% !important;
-        display: block !important;
+        float: none !important; position: relative !important;
+        margin: 0 0 14px 0 !important; padding: 0 !important; width: 100% !important; display: block !important;
     }
-    .scanner-wrap { max-width: 760px; padding: 10px 0; }
 
-    /* Folder picker */
-    .path-row { display: flex; gap: 8px; margin-bottom: 12px; }
-    .path-row .input-field { margin-bottom: 0; flex: 1; }
-    .folder-browser { border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px; margin-bottom: 18px; }
+    /* ===== Compact, centered scanner card ===== */
+    .scan-wrap { max-width: 880px; margin: 0 auto 6px; }
+    .scan-card { padding: 16px 20px; }
+    .scan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .scan-title {
+        display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.5px; color: var(--body-fg, #417690);
+    }
+    .scan-head .nav-link { margin: 0; }
+    .scan-meta { font-size: 13px; color: var(--body-quiet-color, #888); margin: 4px 0 14px; }
+
+    .scan-controls { display: flex; gap: 10px; align-items: center; }
+    .scan-controls .input-field { margin: 0; flex: 1; height: 42px; padding: 0 12px; }
+    .scan-controls select.input-field { height: 42px; padding: 0 12px; }
+    .scan-controls .btn-primary { width: auto; height: 42px; padding: 0 24px; white-space: nowrap; }
+
+    .path-row { display: flex; gap: 8px; margin-top: 10px; }
+    .path-row .input-field { margin: 0; flex: 1; }
+    .path-row .btn-secondary { padding: 0 18px; height: 42px; }
+    .folder-browser { border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px; margin-top: 10px; }
     .fb-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border-color, #e0e0e0); font-size: 13px; }
     .fb-path { font-weight: 600; word-break: break-all; flex: 1; }
-    .fb-list { max-height: 240px; overflow: auto; }
-    .fb-item { padding: 8px 12px; cursor: pointer; font-size: 14px; border-bottom: 1px solid var(--border-color, #f0f0f0); word-break: break-all; }
+    .fb-list { max-height: 200px; overflow: auto; }
+    .fb-item { padding: 7px 12px; cursor: pointer; font-size: 14px; border-bottom: 1px solid var(--border-color, #f0f0f0); word-break: break-all; }
     .fb-item:hover { background: rgba(65, 118, 144, 0.12); }
     .fb-empty { padding: 12px; font-size: 13px; color: var(--body-quiet-color, #888); }
-    .fb-foot { padding: 10px; border-top: 1px solid var(--border-color, #e0e0e0); display: flex; gap: 10px; align-items: center; }
-    .fb-foot .btn-primary { width: auto; padding: 8px 18px; }
+    .fb-foot { padding: 8px 10px; border-top: 1px solid var(--border-color, #e0e0e0); display: flex; gap: 10px; align-items: center; }
+    .fb-foot .btn-primary { width: auto; padding: 7px 16px; }
+
+    /* ===== Scanning state: spinner + progress ===== */
+    .spinner {
+        display: none; width: 16px; height: 16px; border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff;
+        animation: spin 0.8s linear infinite;
+    }
+    .scanning #scanBtn .spinner { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .scan-panel { margin-top: 14px; padding: 12px 14px; border-radius: 6px; background: rgba(65, 118, 144, 0.1); }
+    .scan-panel[hidden] { display: none; }
+    .scan-line { display: flex; justify-content: space-between; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .scan-line .elapsed { font-weight: 400; color: var(--body-quiet-color, #777); font-variant-numeric: tabular-nums; }
+    .progress { height: 6px; border-radius: 3px; overflow: hidden; background: rgba(128, 128, 128, 0.25); }
+    .progress > span {
+        display: block; height: 100%; width: 35%; border-radius: 3px; background: #417690;
+        animation: slide 1.2s ease-in-out infinite;
+    }
+    @keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+    .scan-panel .chips-row { margin: 10px 0 0; gap: 8px; }
+    .scan-panel .chip { padding: 3px 12px; font-size: 12px; }
+    .scan-file { font-size: 12px; color: var(--body-quiet-color, #777); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .scan-status { font-size: 14px; font-weight: 600; margin-top: 12px; text-align: center; }
+    .scan-status[hidden] { display: none; }
+    .scan-foot { display: flex; justify-content: flex-end; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border-color, #ddd); }
+    .btn-danger {
+        display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 18px;
+        border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+        background: transparent; color: #dc3545; border: 1px solid #dc3545; transition: all 0.2s ease;
+    }
+    .btn-danger:hover:not(:disabled) { background: #dc3545; color: #fff; }
+    .btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-danger .spinner { border-color: rgba(220, 53, 69, 0.3); border-top-color: #dc3545; }
+    .btn-danger.busy .spinner { display: inline-block; }
+
+    @media (max-width: 640px) { .scan-controls { flex-direction: column; align-items: stretch; } }
 </style>
 
 <div class="custom-tools-wrapper">
-    <div class="scanner-wrap">
-        <div class="premium-card">
-            <div class="card-header">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
-                System Drive Scanner
+    <div class="scan-wrap">
+        <div id="scanCard" class="premium-card scan-card">
+            <div class="scan-head">
+                <div class="scan-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+                    Step 1 &middot; Scan Your Files
+                </div>
+                <a class="nav-link" href="{% url 'admin:fileindex_bulksearch_changelist' %}">Next: Step 2 &middot; Bulk Number Search &rarr;</a>
             </div>
 
-            <label class="field-label">Select Drive or Folder</label>
-            <select id="driveSelect" class="input-field">
-                <option value="" disabled selected>-- Choose Target Location --</option>
-                {% for key, label in scan_locations %}
-                <option value="{{ key }}">{{ label }}</option>
-                {% endfor %}
-                {% if allow_custom_path %}
-                <option value="__custom__">Specific folder (browse)...</option>
+            <div class="scan-meta">
+                {% if stats.files %}
+                    <b>{{ stats.files|floatformat:"0g" }}</b> files indexed{% if stats.last_scan %} &middot; Last scan: {{ stats.last_scan|date:"d M Y, H:i" }}{% endif %}
+                {% else %}
+                    No files indexed yet. Choose a drive below and start your first scan.
                 {% endif %}
-            </select>
+            </div>
+
+            <div class="scan-controls">
+                <select id="driveSelect" class="input-field" aria-label="Drive or folder to scan">
+                    <option value="" disabled selected>-- Choose drive or folder --</option>
+                    {% for key, label in scan_locations %}
+                    <option value="{{ key }}">{{ label }}</option>
+                    {% endfor %}
+                    {% if allow_custom_path %}
+                    <option value="__custom__">Specific folder (browse)...</option>
+                    {% endif %}
+                </select>
+                <button id="scanBtn" class="btn-primary" type="button">
+                    <span class="spinner"></span><span id="btnText">Start Scan</span>
+                </button>
+            </div>
 
             {% if allow_custom_path %}
             <div id="customBox" style="display: none;">
-                <label class="field-label">Folder path</label>
                 <div class="path-row">
-                    <input id="customPath" class="input-field" type="text" placeholder="Example: D:\Data\Excel Files">
+                    <input id="customPath" class="input-field" type="text" placeholder="Folder path, e.g. D:\Data\Excel Files">
                     <button id="browseBtn" type="button" class="btn-secondary">Browse</button>
                 </div>
-
                 <div id="folderBrowser" class="folder-browser" style="display: none;">
                     <div class="fb-head">
                         <button id="fbUp" type="button" class="tool-btn">&uarr; Up</button>
@@ -71,12 +132,26 @@
             </div>
             {% endif %}
 
-            <div class="action-row">
-                <button id="scanBtn" class="btn-primary"><span id="btnText">Start Background Scan</span></button>
-                <div id="scanStatus" style="font-size: 14px; min-height: 20px; text-align: center; margin-top: 5px;"></div>
+            <div id="scanPanel" class="scan-panel" hidden>
+                <div class="scan-line">
+                    <span>Scanning your files, please wait...</span>
+                    <span id="scanElapsed" class="elapsed"></span>
+                </div>
+                <div class="progress"><span></span></div>
+                <div id="scanCounts" class="chips-row"></div>
+                <div id="scanFile" class="scan-file"></div>
             </div>
 
-            <a class="nav-link" href="{% url 'admin:fileindex_bulksearch_changelist' %}">Go to Bulk Number Search &rarr;</a>
+            <div id="scanStatus" class="scan-status" hidden></div>
+
+            {% if can_clear_index %}
+            <div class="scan-foot">
+                <button id="clearIndexBtn" type="button" class="btn-danger"
+                        title="Removes all indexed data from the database. Your Excel files are not touched.">
+                    <span class="spinner"></span><span id="clearText">Clear File Index</span>
+                </button>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -89,7 +164,9 @@
         start: "{% url 'start_scan' %}",
         check: "{% url 'check_scan' 0 %}",
         browse: "{% url 'browse_folders' %}",
+        clear: "{% url 'clear_index' %}",
     };
+    const resumeTaskId = {% if running_task_id %}{{ running_task_id }}{% else %}null{% endif %};
 
     async function post(url, data) {
         const fd = new FormData();
@@ -101,21 +178,35 @@
         return json;
     }
 
-    const scanBtn = $('scanBtn'), btnText = $('btnText'), statusEl = $('scanStatus');
-    const select = $('driveSelect');
+    const card = $('scanCard'), scanBtn = $('scanBtn'), btnText = $('btnText');
+    const select = $('driveSelect'), panel = $('scanPanel'), statusEl = $('scanStatus');
+    const clearBtn = $('clearIndexBtn'), customBox = $('customBox');
 
     function setStatus(text, color) {
-        statusEl.textContent = text;
-        statusEl.style.color = color;
-        statusEl.style.fontWeight = '600';
+        statusEl.textContent = text || '';
+        statusEl.style.color = color || '';
+        statusEl.hidden = !text;
     }
-    function resetScanBtn() {
-        scanBtn.disabled = false;
-        btnText.textContent = 'Start Background Scan';
+
+    // Scan ya Clear chal raha ho toh saare controls ek saath disable (galti se doosra kaam shuru na ho)
+    function lockControls(locked) {
+        scanBtn.disabled = locked;
+        select.disabled = locked;
+        if (clearBtn) clearBtn.disabled = locked;
+        if (customBox) {
+            $('customPath').disabled = locked;
+            $('browseBtn').disabled = locked;
+        }
+    }
+
+    function setRunning(on) {
+        card.classList.toggle('scanning', on);
+        panel.hidden = !on;
+        btnText.textContent = on ? 'Scanning...' : 'Start Scan';
+        lockControls(on);
     }
 
     /* ---------- FOLDER PICKER ---------- */
-    const customBox = $('customBox');
     if (customBox) {
         const browser = $('folderBrowser'), fbList = $('fbList'), fbPath = $('fbPath');
         let currentPath = '', parentPath = null;
@@ -170,28 +261,80 @@
         });
     }
 
+    /* ---------- CLEAR INDEX ---------- */
+    if (clearBtn) {
+        clearBtn.addEventListener('click', async () => {
+            if (!confirm('Delete ALL indexed data?\n\nYour Excel files on disk will NOT be deleted, ' +
+                         'but you will need to run a scan again before you can search.')) return;
+            lockControls(true);   // Start Scan, dropdown, folder box sab disable
+            clearBtn.classList.add('busy');
+            $('clearText').textContent = 'Clearing...';
+            setStatus('');
+            try {
+                const data = await post(urls.clear, {});
+                setStatus(`\u2713 Index cleared (${data.files_removed} files removed).`, '#28a745');
+                $('clearText').textContent = 'Cleared';
+                clearBtn.classList.remove('busy');
+                setTimeout(() => window.location.reload(), 1500);   // controls reload tak locked rehte hain
+            } catch (e) {
+                setStatus('\u26A0 ' + e.message, '#dc3545');
+                clearBtn.classList.remove('busy');
+                $('clearText').textContent = 'Clear File Index';
+                lockControls(false);
+            }
+        });
+    }
+
     /* ---------- SCANNER ---------- */
-    function poll(taskId) {
+    function fmtTime(sec) {
+        const m = Math.floor(sec / 60), s = sec % 60;
+        return m + ':' + String(s).padStart(2, '0');
+    }
+    function chip(text, cls) {
+        const c = document.createElement('span');
+        c.className = 'chip' + (cls ? ' ' + cls : '');
+        c.textContent = text;
+        return c;
+    }
+    function renderProgress(t) {
+        $('scanElapsed').textContent = 'Elapsed ' + fmtTime(t.elapsed || 0);
+        $('scanCounts').replaceChildren(
+            chip(`${t.folders_scanned} folders`),
+            chip(`${t.files_indexed} indexed`, 'ok'),
+            chip(`${t.files_skipped} unchanged`),
+            chip(`${t.files_failed} failed`, t.files_failed ? 'bad' : '')
+        );
+        $('scanFile').textContent = t.message ? 'Reading: ' + t.message : '';
+    }
+
+    function watch(taskId) {
         const url = urls.check.replace('/0/', '/' + taskId + '/');
-        const timer = setInterval(async () => {
+        setRunning(true);
+        setStatus('');
+        let timer = null;
+
+        async function check() {
             try {
                 const t = await (await fetch(url)).json();
-                const counts = `${t.folders_scanned} folders · ${t.files_indexed} indexed · ${t.files_skipped} unchanged · ${t.files_failed} failed`;
-                if (t.status === 'Running') {
-                    setStatus(counts + (t.message ? ' — ' + t.message : ''), '#f29000');
-                } else if (t.status === 'Completed') {
-                    clearInterval(timer); resetScanBtn();
-                    setStatus('✓ Done! ' + counts, '#28a745');
-                    setTimeout(() => window.location.reload(), 3000);
+                renderProgress(t);
+                if (t.status === 'Running') return;
+
+                clearInterval(timer);
+                setRunning(false);
+                if (t.status === 'Completed') {
+                    setStatus(`\u2713 Scan complete: ${t.files_indexed} indexed, ${t.files_skipped} unchanged, ${t.files_failed} failed.`, '#28a745');
+                    setTimeout(() => window.location.reload(), 2500);
                 } else {
-                    clearInterval(timer); resetScanBtn();
-                    setStatus('⚠ Error: ' + (t.message || 'check server logs'), '#dc3545');
+                    setStatus('\u26A0 Scan failed: ' + (t.message || 'check the server log'), '#dc3545');
                 }
             } catch (e) {
-                clearInterval(timer); resetScanBtn();
-                setStatus('⚠ Connection lost while checking scan status.', '#dc3545');
+                clearInterval(timer);
+                setRunning(false);
+                setStatus('\u26A0 Lost connection while checking the scan.', '#dc3545');
             }
-        }, 2000);
+        }
+        check();
+        timer = setInterval(check, 1500);
     }
 
     scanBtn.addEventListener('click', async () => {
@@ -205,17 +348,19 @@
             payload.custom_path = p;
         }
 
-        scanBtn.disabled = true;
-        btnText.textContent = 'Scanning in background...';
-        setStatus('Starting scan...', '#f29000');
+        setStatus('');
+        setRunning(true);
         try {
             const data = await post(urls.start, payload);
-            poll(data.task_id);
+            watch(data.task_id);
         } catch (e) {
-            resetScanBtn();
-            setStatus('⚠ ' + e.message, '#dc3545');
+            setRunning(false);
+            setStatus('\u26A0 ' + e.message, '#dc3545');
         }
     });
+
+    // Page refresh ke baad bhi chalta hua scan dikhao
+    if (resumeTaskId !== null) watch(resumeTaskId);
 })();
 </script>
 {% endblock %}

@@ -12,5 +12,8 @@ urlpatterns = [
     path('admin/browse-folders-api/', views.browse_folders_api, name='browse_folders'),
     path('admin/extract-numbers-api/', views.extract_numbers_api, name='extract_numbers'),
     path('admin/export-excel-api/', views.export_excel_api, name='export_excel'),
+    path('admin/clear-index-api/', views.clear_index_api, name='clear_index'),
+    path('admin/file-report-api/', views.file_report_api, name='file_report'),
+    path('admin/file-locations-api/', views.file_locations_api, name='file_locations'),
     path('admin/', admin.site.urls),
 ]
