@@ -1,18 +1,6 @@
-{% extends "admin/base_site.html" %}
-{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }}{% endblock %}
-{% block coltype %}{% endblock %}
-
-{% block breadcrumbs %}
-<div class="breadcrumbs">
-<a href="{% url 'admin:index' %}">Home</a>
-&rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
-&rsaquo; {{ opts.verbose_name_plural|capfirst }}
-</div>
-{% endblock %}
-
+{% extends "admin/change_list.html" %}
 {% block content_title %}{% endblock %}
-
-{% block content %}
+{% block object-tools %}
 {% include "admin/_fileindex_styles.html" %}
 
 {% if not has_index %}
@@ -603,3 +591,8 @@
 })();
 </script>
 {% endblock %}
+{% block search %}{% endblock %}
+{% block date_hierarchy %}{% endblock %}
+{% block result_list %}{% endblock %}
+{% block pagination %}{% endblock %}
+{% block filters %}{% endblock %}
