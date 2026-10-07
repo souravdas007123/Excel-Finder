@@ -18,7 +18,7 @@ from .drives import get_scan_locations
 from .excel_parser import extract_numbers, parse_file
 from .models import FileIndex, NumberIndex, ScanTask
 from .report import build_report
-from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, read_row, run_scan, scan_lock
+from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, cancel_event, read_row, run_scan, scan_lock
 
 MAX_NUMBERS = 100_000       # ek baar me screen par max numbers (file-wise summary chhoti rehti hai)
 DETAIL_LIMIT = 2000         # isse zyada numbers par per-number detail nahi bhejte (page tez rahe)
@@ -74,6 +74,16 @@ def start_scan_api(request):
         scan_lock.release()
         raise
     return JsonResponse({"task_id": task.id, "status": "started"})
+
+
+@staff_member_required
+@require_POST
+def stop_scan_api(request):
+    """Chalte hue scan ko rok deta hai. Jo files index ho chuki hain wo rehti hain."""
+    if not scan_lock.locked():
+        return JsonResponse({"error": "No scan is running"}, status=409)
+    cancel_event.set()
+    return JsonResponse({"status": "stopping"})
 
 
 @staff_member_required

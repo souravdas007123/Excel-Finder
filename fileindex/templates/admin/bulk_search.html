@@ -3,14 +3,14 @@
 {% block object-tools %}
 {% include "admin/_fileindex_styles.html" %}
 
-{% if not has_index %}
-<div class="banner-warn">
-    <b>Nothing is indexed yet.</b>
-    Do <a href="{% url 'admin:fileindex_fileindex_changelist' %}">Step 1 &middot; Scan Your Files</a> first, then come back here to search.
-</div>
-{% endif %}
-
 <div class="custom-tools-wrapper bulk-wrap">
+    {% if not has_index %}
+    <div class="banner-warn">
+        <b>Nothing is indexed yet.</b>
+        Do <a href="{% url 'admin:fileindex_fileindex_changelist' %}">Step 1 &middot; Scan Your Files</a> first, then come back here to search.
+    </div>
+    {% endif %}
+
     <!-- INPUT -->
     <div class="premium-card bulk-input">
         <div class="page-head">

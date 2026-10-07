@@ -15,5 +15,6 @@ urlpatterns = [
     path('admin/clear-index-api/', views.clear_index_api, name='clear_index'),
     path('admin/file-report-api/', views.file_report_api, name='file_report'),
     path('admin/file-locations-api/', views.file_locations_api, name='file_locations'),
+    path('admin/stop-scan-api/', views.stop_scan_api, name='stop_scan'),
     path('admin/', admin.site.urls),
 ]
