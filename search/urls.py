@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import path
+from django.urls import path,include
 from fileindex import views 
 
 urlpatterns = [
@@ -17,4 +17,5 @@ urlpatterns = [
     path('admin/file-locations-api/', views.file_locations_api, name='file_locations'),
     path('admin/stop-scan-api/', views.stop_scan_api, name='stop_scan'),
     path('admin/', admin.site.urls),
+    path('', include('fileindex.urls')),
 ]

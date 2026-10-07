@@ -5,6 +5,7 @@ import tempfile
 import threading
 from collections import Counter, defaultdict
 from datetime import datetime
+from django.shortcuts import render
 
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required
@@ -452,3 +453,44 @@ def clear_index_api(request):
     finally:
         scan_lock.release()
     return JsonResponse({"status": "cleared", "files_removed": files_removed})
+
+
+
+
+# Ye aapka pehle wala home view hai
+def home_view(request):
+    context = {
+        'total_files': '1,245',
+        'total_rows': '50.2K',
+        'last_update': 'Today, 10:30 AM',
+        'recent_files': [] 
+    }
+    return render(request, 'home.html', context)
+
+# --- YE NAYA FUNCTION ADD KAREIN ---
+def search_view(request):
+    # URL se 'q' (query) parameter ko get karna
+    query = request.GET.get('q', '')
+    
+    # Abhi ke liye dummy results de rahe hain taaki UI test ho sake
+    results = []
+    if query:
+        results = [
+            {
+                'filename': 'Q3_Report_Match.xlsx', 
+                'size': '1024', 
+                'match_context': 'Content Match', 
+                'filepath': 'C:/Documents/Finance/Q3_Report_Match.xlsx'
+            },
+            {
+                'filename': 'Data_Export.csv', 
+                'size': '512', 
+                'match_context': 'Filename Match', 
+                'filepath': 'C:/Downloads/Data_Export.csv'
+            }
+        ]
+        
+    context = {
+        'results': results
+    }
+    return render(request, 'search.html', context)
