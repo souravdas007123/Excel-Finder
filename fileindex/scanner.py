@@ -27,6 +27,8 @@ PROGRESS_FIELDS = ["folders_scanned", "files_indexed", "files_skipped", "files_f
 
 # Ek time me sirf ek scan chale
 scan_lock = threading.Lock()
+# Stop Scan button isse scan ko rukne ka signal deta hai
+cancel_event = threading.Event()
 
 
 def _make_pool():
@@ -58,6 +60,8 @@ def _store(path, name, stat, hits):
 def run_scan(task_id, root):
     """Background thread. Sirf badli/nayi files padhta hai, aur wo bhi parallel processes me."""
     pool = None
+    cancelled = False
+    cancel_event.clear()
     try:
         task = ScanTask.objects.get(id=task_id)
         if not os.path.isdir(root):
@@ -111,10 +115,16 @@ def run_scan(task_id, root):
                     pool = _make_pool()
 
         for dirpath, dirnames, filenames in os.walk(root):
+            if cancel_event.is_set():
+                cancelled = True
+                break
             dirnames[:] = [d for d in dirnames if d.lower() not in SKIP_DIRS]  # system folders skip
             task.folders_scanned += 1
 
             for fname in filenames:
+                if cancel_event.is_set():
+                    cancelled = True
+                    break
                 if fname.startswith("~$") or not fname.lower().endswith(EXCEL_EXTENSIONS):
                     continue
                 path = os.path.join(dirpath, fname)
@@ -149,21 +159,37 @@ def run_scan(task_id, root):
                     task.save(update_fields=PROGRESS_FIELDS)
                     last_save = time.monotonic()
 
-        drain(0)  # bachi hui files poori karo
+        if cancelled:
+            # Adhoori padhi files chhod do. Jo index ban chuka hai wo rahega. Deleted-files ki safai nahi karte,
+            # kyunki scan poora nahi hua (warna na-scan hui files galti se index se hat jaati).
+            pending.clear()
+            task.status = "Cancelled"
+            task.message = "Stopped by user"
+            task.save(update_fields=PROGRESS_FIELDS + ["status"])
+        else:
+            drain(0)  # bachi hui files poori karo
 
-        # Disk se delete ho chuki files ko index se hatao
-        stale = [p for p in existing if p not in seen]
-        for i in range(0, len(stale), 500):
-            FileIndex.objects.filter(file_path__in=stale[i:i + 500]).delete()
+            # Disk se delete ho chuki files ko index se hatao
+            stale = [p for p in existing if p not in seen]
+            for i in range(0, len(stale), 500):
+                FileIndex.objects.filter(file_path__in=stale[i:i + 500]).delete()
 
-        task.status = "Completed"
-        task.message = ""
-        task.save(update_fields=PROGRESS_FIELDS + ["status"])
+            task.status = "Completed"
+            task.message = ""
+            task.save(update_fields=PROGRESS_FIELDS + ["status"])
     except Exception as exc:
         logger.exception("Scan failed")
         ScanTask.objects.filter(id=task_id).update(status="Error", message=str(exc)[:500])
     finally:
-        if pool is not None:
-            pool.shutdown(wait=True, cancel_futures=True)
-        connection.close()
+        # Yahan koi bhi error aaye, lock HAMESHA release hona chahiye. Warna page hamesha "scan chal raha hai"
+        # maanta rahega aur dropdown / Start button locked rehte hain.
+        try:
+            if pool is not None:
+                pool.shutdown(wait=not cancelled, cancel_futures=True)   # Stop par chalte kaam ka intezaar nahi
+        except Exception:
+            logger.exception("Could not shut down the worker pool")
+        try:
+            connection.close()
+        except Exception:
+            pass
         scan_lock.release()

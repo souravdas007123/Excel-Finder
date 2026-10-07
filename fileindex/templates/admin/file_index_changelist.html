@@ -50,7 +50,9 @@
 
     .scan-panel { margin-top: 14px; padding: 12px 14px; border-radius: 6px; background: rgba(65, 118, 144, 0.1); }
     .scan-panel[hidden] { display: none; }
-    .scan-line { display: flex; justify-content: space-between; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .scan-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .scan-right { display: flex; align-items: center; gap: 12px; }
+    .btn-danger.btn-sm { height: 28px; padding: 0 14px; font-size: 12px; }
     .scan-line .elapsed { font-weight: 400; color: var(--body-quiet-color, #777); font-variant-numeric: tabular-nums; }
     .progress { height: 6px; border-radius: 3px; overflow: hidden; background: rgba(128, 128, 128, 0.25); }
     .progress > span {
@@ -99,7 +101,7 @@
 
             <div class="scan-controls">
                 <select id="driveSelect" class="input-field" aria-label="Drive or folder to scan">
-                    <option value="" disabled selected>-- Choose drive or folder --</option>
+                    <option value="" selected>-- Choose drive or folder --</option>
                     {% for key, label in scan_locations %}
                     <option value="{{ key }}">{{ label }}</option>
                     {% endfor %}
@@ -135,7 +137,10 @@
             <div id="scanPanel" class="scan-panel" hidden>
                 <div class="scan-line">
                     <span>Scanning your files, please wait...</span>
-                    <span id="scanElapsed" class="elapsed"></span>
+                    <span class="scan-right">
+                        <span id="scanElapsed" class="elapsed"></span>
+                        <button id="stopScanBtn" type="button" class="btn-danger btn-sm">Stop Scan</button>
+                    </span>
                 </div>
                 <div class="progress"><span></span></div>
                 <div id="scanCounts" class="chips-row"></div>
@@ -163,6 +168,7 @@
     const urls = {
         start: "{% url 'start_scan' %}",
         check: "{% url 'check_scan' 0 %}",
+        stop: "{% url 'stop_scan' %}",
         browse: "{% url 'browse_folders' %}",
         clear: "{% url 'clear_index' %}",
     };
@@ -180,7 +186,7 @@
 
     const card = $('scanCard'), scanBtn = $('scanBtn'), btnText = $('btnText');
     const select = $('driveSelect'), panel = $('scanPanel'), statusEl = $('scanStatus');
-    const clearBtn = $('clearIndexBtn'), customBox = $('customBox');
+    const clearBtn = $('clearIndexBtn'), customBox = $('customBox'), stopBtn = $('stopScanBtn');
 
     function setStatus(text, color) {
         statusEl.textContent = text || '';
@@ -203,8 +209,23 @@
         card.classList.toggle('scanning', on);
         panel.hidden = !on;
         btnText.textContent = on ? 'Scanning...' : 'Start Scan';
+        stopBtn.disabled = false;
+        stopBtn.textContent = 'Stop Scan';
         lockControls(on);
     }
+
+    stopBtn.addEventListener('click', async () => {
+        if (!confirm('Stop the scan?\n\nFiles that are already indexed will be kept.')) return;
+        stopBtn.disabled = true;
+        stopBtn.textContent = 'Stopping...';
+        try {
+            await post(urls.stop, {});   // scan thoda rukne me kuch second le sakta hai; status poll se pata chal jata hai
+        } catch (e) {
+            stopBtn.disabled = false;
+            stopBtn.textContent = 'Stop Scan';
+            setStatus('\u26A0 ' + e.message, '#dc3545');
+        }
+    });
 
     /* ---------- FOLDER PICKER ---------- */
     if (customBox) {
@@ -323,6 +344,9 @@
                 setRunning(false);
                 if (t.status === 'Completed') {
                     setStatus(`\u2713 Scan complete: ${t.files_indexed} indexed, ${t.files_skipped} unchanged, ${t.files_failed} failed.`, '#28a745');
+                    setTimeout(() => window.location.reload(), 2500);
+                } else if (t.status === 'Cancelled') {
+                    setStatus(`Scan stopped. ${t.files_indexed} files were indexed before stopping.`, '#f29000');
                     setTimeout(() => window.location.reload(), 2500);
                 } else {
                     setStatus('\u26A0 Scan failed: ' + (t.message || 'check the server log'), '#dc3545');

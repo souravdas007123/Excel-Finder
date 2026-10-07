@@ -1,28 +1,16 @@
-{% extends "admin/base_site.html" %}
-{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }}{% endblock %}
-{% block coltype %}{% endblock %}
-
-{% block breadcrumbs %}
-<div class="breadcrumbs">
-<a href="{% url 'admin:index' %}">Home</a>
-&rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
-&rsaquo; {{ opts.verbose_name_plural|capfirst }}
-</div>
-{% endblock %}
-
+{% extends "admin/change_list.html" %}
 {% block content_title %}{% endblock %}
-
-{% block content %}
+{% block object-tools %}
 {% include "admin/_fileindex_styles.html" %}
 
-{% if not has_index %}
-<div class="banner-warn">
-    <b>Nothing is indexed yet.</b>
-    Do <a href="{% url 'admin:fileindex_fileindex_changelist' %}">Step 1 &middot; Scan Your Files</a> first, then come back here to search.
-</div>
-{% endif %}
-
 <div class="custom-tools-wrapper bulk-wrap">
+    {% if not has_index %}
+    <div class="banner-warn">
+        <b>Nothing is indexed yet.</b>
+        Do <a href="{% url 'admin:fileindex_fileindex_changelist' %}">Step 1 &middot; Scan Your Files</a> first, then come back here to search.
+    </div>
+    {% endif %}
+
     <!-- INPUT -->
     <div class="premium-card bulk-input">
         <div class="page-head">
@@ -603,3 +591,8 @@
 })();
 </script>
 {% endblock %}
+{% block search %}{% endblock %}
+{% block date_hierarchy %}{% endblock %}
+{% block result_list %}{% endblock %}
+{% block pagination %}{% endblock %}
+{% block filters %}{% endblock %}

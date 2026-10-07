@@ -1,8 +1,6 @@
 import re
 
 from django.contrib import admin
-from django.core.exceptions import PermissionDenied
-from django.template.response import TemplateResponse
 
 from .drives import get_scan_locations
 from .models import BulkSearch, FileIndex, NumberIndex, ScanTask
@@ -52,7 +50,16 @@ class FileIndexAdmin(admin.ModelAdmin):
 
 @admin.register(BulkSearch)
 class BulkSearchAdmin(admin.ModelAdmin):
-    """Sidebar wala 'Bulk Number Search' page. Koi DB query nahi chalti, sirf template render hota hai."""
+    """Sidebar wala 'Bulk Number Search' page.
+
+    Ye Step 1 / Scan History jaisa hi Django changelist page hai (isliye breadcrumb aur padding bilkul same).
+    Table khali rakhte hain (queryset .none()), isliye koi DB query nahi chalti.
+    """
+    change_list_template = "admin/bulk_search.html"
+    show_full_result_count = False
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).none()
 
     def has_add_permission(self, request):
         return False
@@ -64,18 +71,13 @@ class BulkSearchAdmin(admin.ModelAdmin):
         return False
 
     def changelist_view(self, request, extra_context=None):
-        if not self.has_view_permission(request):
-            raise PermissionDenied
-        context = {
-            **self.admin_site.each_context(request),
-            "title": "Bulk Number Search",
-            "opts": self.model._meta,
+        extra_context = extra_context or {}
+        extra_context.update({
             "min_digits": MIN_DIGITS,
             "max_numbers": MAX_NUMBERS,
             "has_index": FileIndex.objects.exists(),   # kuch scan hua hai ya nahi
-        }
-        return TemplateResponse(request, "admin/bulk_search.html", context)
-
+        })
+        return super().changelist_view(request, extra_context=extra_context)
 
 @admin.register(ScanTask)
 class ScanTaskAdmin(admin.ModelAdmin):

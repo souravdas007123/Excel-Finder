@@ -162,12 +162,15 @@
     .upload-note { font-size: 13px; color: var(--body-quiet-color, #777); }
     .upload-note.err { color: #dc3545; font-weight: 600; }
 
-    /* ===== Guidance banner ===== */
-    .banner-warn {
-        padding: 12px 16px; border-radius: 6px; margin-bottom: 18px; font-size: 14px;
+    /* ===== Guidance banner (Step 2 page) ===== */
+    .bulk-wrap .banner-warn {
+        display: block; box-sizing: border-box; width: 100%;
+        margin: 0 0 18px; padding: 12px 16px; border-radius: 6px;
+        font-size: 14px; line-height: 1.5; text-align: left;
         background: rgba(242, 144, 0, 0.14); border: 1px solid rgba(242, 144, 0, 0.45); color: var(--body-fg, #333);
     }
-    .banner-warn a { color: #417690; font-weight: 700; }
+    .bulk-wrap .banner-warn b { font-weight: 700; color: inherit; }
+    .bulk-wrap .banner-warn a { color: #417690; font-weight: 700; text-decoration: underline; }
 
     /* ===== Tabs and file-wise view ===== */
     .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
