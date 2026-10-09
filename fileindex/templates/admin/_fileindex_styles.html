@@ -206,4 +206,18 @@
         border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px;
     }
     .empty-note { padding: 22px; text-align: center; font-style: italic; color: var(--body-quiet-color, #888); }
+    /* ===== By File tools, copy buttons, not-found actions ===== */
+    .file-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .file-tools .input-field { margin: 0; height: 38px; padding: 0 12px; width: auto; }
+    .file-tools select.input-field { height: 38px; padding: 0 12px; }
+    .file-tools #fileFilter { flex: 1; min-width: 220px; }
+    .file-tools .hint { margin: 0; }
+    .row-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+    .row-actions .tool-btn { white-space: nowrap; }
+    .path-copy { display: block; margin-top: 6px; }
+    .restore-note { margin: -10px 0 14px; }
+    .restore-note[hidden] { display: none; }
+    .missing-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .missing-actions .hint { margin: 0 0 0 4px; }
+    .tool-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 </style>

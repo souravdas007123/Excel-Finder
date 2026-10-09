@@ -30,6 +30,7 @@
         <label class="field-label" for="bulkNumbers">Enter Numbers (comma separated or one per line)</label>
         <textarea id="bulkNumbers" class="input-field" placeholder="Example:&#10;9856325417&#10;8569741235"></textarea>
         <div id="numCounter" class="hint">0 numbers detected · numbers shorter than {{ min_digits }} digits are ignored · Ctrl+Enter to search</div>
+        <div id="restoreNote" class="hint restore-note" hidden></div>
 
         <div class="upload-row">
             <button id="uploadBtn" type="button" class="btn-secondary">Upload Excel / CSV</button>
@@ -64,6 +65,16 @@
 
         <!-- TAB 1: which files contain how many of the numbers -->
         <div id="paneFiles" class="pane">
+            <div class="file-tools">
+                <input id="fileFilter" class="input-field" type="search" autocomplete="off"
+                       placeholder="Filter files by name or folder..." aria-label="Filter files by name or folder">
+                <select id="fileSort" class="input-field" aria-label="Sort files">
+                    <option value="count">Most numbers first</option>
+                    <option value="name">File name A&ndash;Z</option>
+                    <option value="newest">Newest modified first</option>
+                </select>
+                <span id="fileCountNote" class="hint"></span>
+            </div>
             <div class="table-scroll">
                 <table class="result-table no-stripe" style="border: none;">
                     <thead>
@@ -71,8 +82,8 @@
                             <th style="width: 4%;">#</th>
                             <th style="width: 28%;">File</th>
                             <th style="width: 14%;">Numbers Found</th>
-                            <th style="width: 40%;">Which Numbers</th>
-                            <th style="width: 14%;"></th>
+                            <th style="width: 39%;">Which Numbers</th>
+                            <th style="width: 15%;"></th>
                         </tr>
                     </thead>
                     <tbody id="fileBody"></tbody>
@@ -106,6 +117,11 @@
 
         <!-- TAB 3: numbers that were not found -->
         <div id="paneMissing" class="pane" hidden>
+            <div class="missing-actions">
+                <button id="missingCopyBtn" class="tool-btn" type="button">Copy all</button>
+                <button id="missingDownloadBtn" class="tool-btn" type="button">Download .txt</button>
+                <span id="missingCount" class="hint"></span>
+            </div>
             <div id="missingBox" class="missing-box"></div>
         </div>
     </div>
@@ -116,6 +132,8 @@
     const $ = (id) => document.getElementById(id);
     const csrf = '{{ csrf_token }}';
     const MIN_DIGITS = {{ min_digits }};
+    const HAS_INDEX = {{ has_index|yesno:"true,false" }};
+    const STORE_KEY = 'excelFinder.bulkSearch.v1';
     const urls = {
         search: "{% url 'bulk_search' %}",
         row: "{% url 'row_detail' %}",
@@ -161,9 +179,57 @@
     const searchBtn = $('bulkSearchBtn'), searchText = $('bulkBtnText');
     const input = $('bulkNumbers');
     const state = {
-        files: [], results: [], missing: [], input: '', detail: true,
+        allFiles: [], files: [], results: [], missing: [], input: '', detail: true,
         filter: 'all', fileShown: PAGE, fileRendered: 0, numShown: PAGE, numRendered: 0,
     };
+
+    /* ---- small helpers: copy, download, remember last search ---- */
+    async function copyText(text) {
+        try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* neeche fallback */ }
+        try {   // http / purane browser: clipboard API nahi chalti
+            const ta = document.createElement('textarea');
+            ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            const ok = document.execCommand('copy');
+            ta.remove();
+            return ok;
+        } catch (e) { return false; }
+    }
+    // Button par chhota feedback ("Copied") dikha kar purana text wapas
+    function flash(btn, text) {
+        if (btn._label === undefined) btn._label = btn.textContent;
+        btn.textContent = text;
+        clearTimeout(btn._t);
+        btn._t = setTimeout(() => { btn.textContent = btn._label; btn._label = undefined; }, 1600);
+    }
+    async function copyWithFeedback(btn, text, doneText) {
+        flash(btn, (await copyText(text)) ? (doneText || 'Copied \u2713') : 'Copy failed');
+    }
+    function downloadText(name, text) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+        a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(a.href);
+    }
+    const fullPath = (folder, file) => {
+        if (!folder) return file;
+        const sep = folder.includes('\\') ? '\\' : '/';
+        return folder.replace(/[\\/]+$/, '') + sep + file;
+    };
+    function pathCopyButton(folder, file) {
+        const b = el('button', 'Copy path', 'link-btn path-copy');
+        b.type = 'button';
+        b.title = fullPath(folder, file);
+        b.addEventListener('click', () => copyWithFeedback(b, fullPath(folder, file), 'Path copied \u2713'));
+        return b;
+    }
+    function saveSearch(numbers) {
+        try {
+            if (numbers.length < 1500000) localStorage.setItem(STORE_KEY, JSON.stringify({ input: numbers, sort: $('fileSort').value }));
+        } catch (e) { /* private mode / storage full: koi baat nahi */ }
+    }
+    function forgetSearch() { try { localStorage.removeItem(STORE_KEY); } catch (e) {} }
 
     /* ---- live counter ---- */
     function updateCounter() {
@@ -182,8 +248,10 @@
     $('clearBtn').addEventListener('click', () => {
         input.value = '';
         updateCounter();
-        state.files = []; state.results = []; state.missing = [];
+        state.allFiles = []; state.files = []; state.results = []; state.missing = [];
         $('bulkResultContainer').style.display = 'none';
+        $('restoreNote').hidden = true;
+        forgetSearch();
         input.focus();
     });
 
@@ -297,6 +365,7 @@
         const btn = el('button', 'View full row', 'link-btn');
         btn.type = 'button';
         tags.appendChild(btn);
+        if (withFile) tags.appendChild(pathCopyButton(m.folder, m.file));
         item.appendChild(tags);
 
         const box = el('div', undefined, 'row-detail');
@@ -370,7 +439,8 @@
             const td = tr.insertCell();
             td.colSpan = 5;
             td.className = 'empty-note';
-            td.textContent = 'None of these numbers were found in the indexed files.';
+            td.textContent = state.allFiles.length ? 'No files match your filter.'
+                                                   : 'None of these numbers were found in the indexed files.';
             frag.appendChild(tr);
         }
 
@@ -384,6 +454,7 @@
             folder.title = f.folder;
             fileCell.appendChild(folder);
             if (f.modified) fileCell.appendChild(el('span', 'Modified: ' + f.modified, 'tag muted'));
+            fileCell.appendChild(pathCopyButton(f.folder, f.file));
 
             const countCell = tr.insertCell();
             countCell.appendChild(el('div', fmt(f.numbers_count), 'big-num'));
@@ -397,7 +468,16 @@
 
             const btn = el('button', 'View details', 'tool-btn');
             btn.type = 'button';
-            tr.insertCell().appendChild(btn);
+            const partial = f.numbers_count > f.numbers.length;
+            const copyBtn = el('button', partial ? `Copy first ${fmt(f.numbers.length)}` : 'Copy numbers', 'tool-btn');
+            copyBtn.type = 'button';
+            copyBtn.title = partial ? 'Only the first ' + fmt(f.numbers.length) + ' numbers are loaded. Use "Export Excel report" for all.'
+                                    : 'Copy the numbers found in this file';
+            copyBtn.addEventListener('click', () => copyWithFeedback(copyBtn, f.numbers.join('\n')));
+            const actions = el('div', undefined, 'row-actions');
+            actions.appendChild(btn);
+            actions.appendChild(copyBtn);
+            tr.insertCell().appendChild(actions);
 
             const detailTr = document.createElement('tr');
             detailTr.className = 'detail-row';
@@ -419,6 +499,29 @@
         $('filesMoreBtn').textContent = `Show ${Math.min(PAGE, remaining)} more files (${fmt(remaining)} remaining)`;
     }
     $('filesMoreBtn').addEventListener('click', () => { state.fileShown += PAGE; renderFiles(false); });
+
+
+    /* ---- By File: filter + sort ---- */
+    function applyFileView() {
+        const q = $('fileFilter').value.trim().toLowerCase();
+        const sort = $('fileSort').value;
+        let list = state.allFiles;
+        if (q) list = list.filter((f) => (f.file + ' ' + f.folder).toLowerCase().includes(q));
+        const byName = (a, b) => a.file.localeCompare(b.file, undefined, { sensitivity: 'base' });
+        list = list.slice().sort(
+            sort === 'name' ? byName
+          : sort === 'newest' ? (a, b) => (b.mtime - a.mtime) || byName(a, b)
+          : (a, b) => (b.numbers_count - a.numbers_count) || byName(a, b));
+        state.files = list;
+        state.fileShown = PAGE;
+        renderFiles(true);
+        $('fileCountNote').textContent = state.allFiles.length
+            ? (q ? `Showing ${fmt(list.length)} of ${fmt(state.allFiles.length)} files` : `${fmt(list.length)} file${list.length === 1 ? '' : 's'}`)
+            : '';
+    }
+    let filterTimer;
+    $('fileFilter').addEventListener('input', () => { clearTimeout(filterTimer); filterTimer = setTimeout(applyFileView, 150); });
+    $('fileSort').addEventListener('change', () => { applyFileView(); if (state.input) saveSearch(state.input); });
 
     /* ---- TAB 2: By Number (detailed) ---- */
     function visibleRows() {
@@ -480,7 +583,10 @@
     /* ---- TAB 3: Not Found ---- */
     function renderMissing() {
         const box = $('missingBox');
-        if (!state.missing.length) { box.textContent = 'Every number was found.'; return; }
+        const n = state.missing.length;
+        $('missingCopyBtn').disabled = $('missingDownloadBtn').disabled = !n;
+        $('missingCount').textContent = n ? `${fmt(n)} number${n === 1 ? '' : 's'} not found` : '';
+        if (!n) { box.textContent = 'Every number was found.'; return; }
         const LIMIT = 2000;
         const shown = state.missing.slice(0, LIMIT);
         box.textContent = shown.join('\n') + (state.missing.length > LIMIT
@@ -523,19 +629,19 @@
                 `The per-number view is available for up to ${fmt(s.detail_limit)} numbers. For this search use By File, ` +
                 'or Export Excel report for the complete list.', 'note'));
         }
-        if (s.files > state.files.length) {
-            notes.appendChild(el('div', `Showing the top ${fmt(state.files.length)} of ${fmt(s.files)} files (most numbers first).`, 'note'));
+        if (s.files > state.allFiles.length) {
+            notes.appendChild(el('div', `Showing the top ${fmt(state.allFiles.length)} of ${fmt(s.files)} files (most numbers first).`, 'note'));
         }
     }
 
-    $('copyMissingBtn').addEventListener('click', async () => {
-        if (!state.missing.length) { alert('No missing numbers. Everything was found.'); return; }
-        try {
-            await navigator.clipboard.writeText(state.missing.join('\n'));
-            alert(fmt(state.missing.length) + ' not-found numbers copied.');
-        } catch (e) {
-            alert('Copy failed. Browser blocked clipboard access.');
-        }
+    function copyMissing(btn) {
+        if (!state.missing.length) { flash(btn, 'Nothing to copy'); return; }
+        copyWithFeedback(btn, state.missing.join('\n'), `${fmt(state.missing.length)} copied \u2713`);
+    }
+    $('copyMissingBtn').addEventListener('click', (e) => copyMissing(e.currentTarget));
+    $('missingCopyBtn').addEventListener('click', (e) => copyMissing(e.currentTarget));
+    $('missingDownloadBtn').addEventListener('click', () => {
+        if (state.missing.length) downloadText('not_found_numbers.txt', state.missing.join('\n') + '\n');
     });
 
     $('exportXlsxBtn').addEventListener('click', async () => {
@@ -562,7 +668,7 @@
     });
 
     /* ---- search ---- */
-    searchBtn.addEventListener('click', async () => {
+    async function runSearch(auto) {
         const numbers = input.value;
         if (!numbers.trim()) { alert('Please enter some numbers to search!'); return; }
 
@@ -570,7 +676,8 @@
         searchText.textContent = 'Searching database...';
         try {
             const data = await post(urls.search, { numbers });
-            state.files = data.files;
+            state.allFiles = data.files;
+            $('fileFilter').value = '';
             state.results = data.results;
             state.missing = data.not_found;
             state.input = numbers;
@@ -582,18 +689,40 @@
 
             renderSummary(data.summary);
             $('tabNumbers').hidden = !state.detail;
-            renderFiles(true);
+            applyFileView();
             renderNumbers(true);
             renderMissing();
             setTab('files');
             $('bulkResultContainer').style.display = 'flex';
+            saveSearch(numbers);
         } catch (e) {
-            alert('An error occurred while searching: ' + e.message);
+            if (auto) {
+                const note = $('restoreNote');
+                note.textContent = '\u26A0 Could not re-run your last search: ' + e.message;
+                note.hidden = false;
+            } else {
+                alert('An error occurred while searching: ' + e.message);
+            }
         } finally {
             searchBtn.disabled = false;
             searchText.textContent = 'Search Database';
         }
-    });
+    }
+    searchBtn.addEventListener('click', () => runSearch(false));
+
+    /* ---- restore last search (page refresh / coming back later) ---- */
+    (function restore() {
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (e) {}
+        if (!saved || typeof saved.input !== 'string' || !saved.input.trim()) return;
+        if (['count', 'name', 'newest'].includes(saved.sort)) $('fileSort').value = saved.sort;
+        input.value = saved.input;
+        updateCounter();
+        const note = $('restoreNote');
+        note.textContent = 'Restored your last search. Press Clear to remove it.';
+        note.hidden = false;
+        if (HAS_INDEX) runSearch(true);
+    })();
 })();
 </script>
 {% endblock %}

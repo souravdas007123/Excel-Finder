@@ -199,7 +199,7 @@ def _lookup_chunks(numbers, max_hits, file_stats=None):
                 if fs is None:
                     fs = file_stats[file_id] = {
                         "file_id": file_id, "file": name, "folder": os.path.dirname(path),
-                        "modified": _fmt_mtime(mtime), "numbers_count": 0, "matches": 0, "numbers": [],
+                        "modified": _fmt_mtime(mtime), "mtime": mtime or 0, "numbers_count": 0, "matches": 0, "numbers": [],
                     }
                 fs["matches"] += 1
                 pair = (file_id, number)
