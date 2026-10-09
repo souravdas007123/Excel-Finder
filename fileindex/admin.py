@@ -2,12 +2,13 @@ import re
 
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied
+from django.utils.html import format_html, format_html_join
 from django.template.response import TemplateResponse
 
 from .drives import get_scan_locations
 from .excel_parser import match_key
 from .models import BulkSearch, FileIndex, NumberIndex, ScanTask
-from .scanner import MIN_DIGITS, scan_lock
+from .scanner import MAX_FAILURES_STORED, MIN_DIGITS, scan_lock
 from .sidebar import build_sidebar
 from .views import MAX_NUMBERS, custom_path_allowed
 
@@ -43,6 +44,10 @@ class FileIndexAdmin(admin.ModelAdmin):
         extra_context["running_task_id"] = (
             ScanTask.objects.filter(status="Running").order_by("-id").values_list("id", flat=True).first()
             if scan_lock.locked() else None
+        )
+        last = ScanTask.objects.exclude(status="Running").order_by("-id").first()
+        extra_context["last_scan_failed"] = (
+            {"id": last.id, "count": last.files_failed} if last and last.files_failed else None
         )
         extra_context["stats"] = {
             "files": FileIndex.objects.count(),
@@ -84,6 +89,30 @@ class ScanTaskAdmin(admin.ModelAdmin):
     list_display = ("id", "status", "folders_scanned", "files_indexed",
                     "files_skipped", "files_failed", "message", "created_at")
     ordering = ("-id",)
+    # History hai: sirf dekhne ke liye (edit / Save nahi). Delete admin se ho sakta hai.
+    fields = ("status", "folders_scanned", "files_indexed", "files_skipped", "files_failed", "message",
+              "created_at", "failed_files")
+    readonly_fields = fields
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Files that could not be read")
+    def failed_files(self, obj):
+        rows = list(obj.failures.order_by("id")[:MAX_FAILURES_STORED])
+        if not rows:
+            return "None"
+        table = format_html_join(
+            "", '<tr><td style="word-break:break-all">{}</td><td>{}</td></tr>',
+            ((r.file_path, r.reason) for r in rows))
+        note = ""
+        if obj.files_failed > len(rows):
+            note = format_html("<p>Showing the first {} of {} files.</p>", len(rows), obj.files_failed)
+        return format_html("<table><thead><tr><th>File</th><th>Why</th></tr></thead><tbody>{}</tbody></table>{}",
+                           table, note)
 
 
 # ---- Sidebar ko workflow order me dikhao (Step 1 -> Step 2 -> History -> Users) ----

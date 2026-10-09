@@ -36,6 +36,19 @@ class ScanTask(models.Model):
     message = models.CharField(max_length=500, blank=True)  # current file / error text
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def __str__(self):
+        return f"Scan #{self.pk} ({self.status})"
+
+
+class ScanFailure(models.Model):
+    """Scan me jo file padhi nahi gayi: kaun si file aur kyun (Scan History page par dikhta hai)."""
+    task = models.ForeignKey(ScanTask, on_delete=models.CASCADE, related_name="failures")
+    file_path = models.CharField(max_length=1000)
+    reason = models.CharField(max_length=500, blank=True)
+
+    def __str__(self):
+        return self.file_path
+
 
 class BulkSearch(FileIndex):
     """Sirf admin sidebar me 'Bulk Number Search' ka link dikhane ke liye (proxy = koi nayi table nahi banti)."""

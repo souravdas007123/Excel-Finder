@@ -21,6 +21,9 @@
     .scan-head .nav-link { margin: 0; }
     .scan-meta { font-size: 13px; color: var(--body-quiet-color, #888); margin: 4px 0 14px; }
 
+    .scan-warn { margin-top: 6px; color: #b36b00; }
+    .scan-warn a { font-weight: 600; }
+
     .scan-controls { display: flex; gap: 10px; align-items: center; }
     .scan-controls .input-field { margin: 0; flex: 1; height: 42px; padding: 0 12px; }
     .scan-controls select.input-field { height: 42px; padding: 0 12px; }
@@ -124,6 +127,12 @@
                     <b>{{ stats.files|floatformat:"0g" }}</b> files indexed{% if stats.last_scan %} &middot; Last scan: {{ stats.last_scan|date:"d M Y, H:i" }}{% endif %}
                 {% else %}
                     No files indexed yet. Choose a drive below and start your first scan.
+                {% endif %}
+                {% if last_scan_failed %}
+                    <div class="scan-warn">
+                        &#9888; {{ last_scan_failed.count }} file{{ last_scan_failed.count|pluralize }} could not be read in the last scan.
+                        <a href="{% url 'admin:fileindex_scantask_change' last_scan_failed.id %}">See which files and why</a>
+                    </div>
                 {% endif %}
             </div>
 
