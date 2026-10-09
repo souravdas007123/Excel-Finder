@@ -18,7 +18,7 @@ from .drives import get_scan_locations
 from .excel_parser import extract_numbers, match_key, parse_file
 from .models import FileIndex, NumberIndex, ScanTask
 from .report import build_report
-from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, cancel_event, read_row, run_scan, scan_lock
+from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, cancel_event, read_row, run_scan, scan_lock, scan_progress
 
 MAX_NUMBERS = 2000          # ek baar me max numbers (isse zyada ho toh full Excel report milti hai)
 DETAIL_LIMIT = 2000         # isse zyada numbers par per-number detail nahi bhejte (page tez rahe)
@@ -100,6 +100,9 @@ def check_scan_status(request, task_id):
         "files_failed": task.files_failed,
         "message": task.message,
         "elapsed": int((timezone.now() - task.created_at).total_seconds()),
+        # Kul Excel files (ETA ke liye). None = abhi gin rahe hain. Scan khatam hone par zaruri nahi.
+        "files_total": scan_progress["total"] if scan_progress["task_id"] == task.id else None,
+        "files_counted": scan_progress["counted"] if scan_progress["task_id"] == task.id else 0,
     })
 
 

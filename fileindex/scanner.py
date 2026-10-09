@@ -30,6 +30,8 @@ PROGRESS_FIELDS = ["folders_scanned", "files_indexed", "files_skipped", "files_f
 scan_lock = threading.Lock()
 # Stop Scan button isse scan ko rukne ka signal deta hai
 cancel_event = threading.Event()
+# Scan ke saath alag thread Excel files ginta hai, taaki "kitna baaki" (ETA) dikha sakein. Ek time me ek hi scan.
+scan_progress = {"run": None, "task_id": None, "total": None, "counted": 0}
 STORE_BATCH = 20_000   # badi file ek saath nahi, itni-itni rows me DB me likhte hain (beech me Stop check ho sake)
 
 
@@ -64,6 +66,22 @@ def _kill_workers(pool):
             proc.terminate()
     except Exception:
         logger.exception("Could not stop worker processes")
+
+
+def _count_excel_files(root, run):
+    """Background me kul Excel files gino (scan ke saath chalta hai). Scan se zyada tez chalta hai, kyunki file padhni nahi padti."""
+    counted = 0
+    try:
+        for _dirpath, dirnames, filenames in os.walk(root):
+            if cancel_event.is_set() or scan_progress["run"] is not run:
+                return
+            dirnames[:] = [d for d in dirnames if d.lower() not in SKIP_DIRS]
+            counted += sum(1 for f in filenames if not f.startswith("~$") and f.lower().endswith(EXCEL_EXTENSIONS))
+            scan_progress["counted"] = counted
+        if scan_progress["run"] is run:
+            scan_progress["total"] = counted
+    except Exception:
+        logger.exception("Could not count Excel files for the scan estimate")
 
 
 def _make_pool():
@@ -106,6 +124,9 @@ def run_scan(task_id, root):
         if not os.path.isdir(root):
             raise FileNotFoundError(f"Folder not found: {root}")
         root = os.path.normpath(root)
+        run = object()   # is scan ki pehchaan: purane scan ka counting thread naye scan ka data na badle
+        scan_progress.update(run=run, task_id=task_id, total=None, counted=0)
+        threading.Thread(target=_count_excel_files, args=(root, run), daemon=True).start()
         # Trailing separator zaruri: 'D:\\Data' scan karte waqt 'D:\\Data2' ki files na chhui jayein
         prefix = root if root.endswith(os.sep) else root + os.sep
         if connection.vendor == "sqlite":
