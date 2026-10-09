@@ -5,6 +5,7 @@ from django.core.exceptions import PermissionDenied
 from django.template.response import TemplateResponse
 
 from .drives import get_scan_locations
+from .excel_parser import match_key
 from .models import BulkSearch, FileIndex, NumberIndex, ScanTask
 from .scanner import MIN_DIGITS, scan_lock
 from .sidebar import build_sidebar
@@ -26,7 +27,8 @@ class FileIndexAdmin(admin.ModelAdmin):
         terms = {re.sub(r"\D", "", t) for t in re.split(r"[,;\s]+", search_term)}
         terms.discard("")
         if terms:
-            file_ids = NumberIndex.objects.filter(number__in=terms).values("file_id")
+            keys = {match_key(t) for t in terms}   # country code / leading 0 ignore (aakhri 10 digits)
+            file_ids = NumberIndex.objects.filter(match_key__in=keys).values("file_id")
             found = found | queryset.filter(pk__in=file_ids)
         return found, may_have_duplicates
 

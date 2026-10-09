@@ -36,6 +36,9 @@
             <button id="uploadBtn" type="button" class="btn-secondary">Upload Excel / CSV</button>
             <input id="fileInput" type="file" accept=".xlsx,.xlsm,.xls,.xlsb,.csv,.txt" hidden>
             <label class="chk"><input type="checkbox" id="firstColOnly"> Read first column only</label>
+            <label class="chk" title="9856325417, 09856325417 and +91 98563 25417 are treated as the same number">
+                <input type="checkbox" id="last10" checked> Ignore country code (match last 10 digits)
+            </label>
             <span id="uploadNote" class="upload-note">Files with more than {{ max_numbers }} numbers give a full Excel report.</span>
         </div>
 
@@ -183,7 +186,7 @@
     const searchBtn = $('bulkSearchBtn'), searchText = $('bulkBtnText');
     const input = $('bulkNumbers');
     const state = {
-        allFiles: [], files: [], results: [], missing: [], input: '', detail: true,
+        allFiles: [], files: [], results: [], missing: [], input: '', detail: true, last10: '1',
         filter: 'all', fileShown: PAGE, fileRendered: 0, numShown: PAGE, numRendered: 0,
     };
 
@@ -216,6 +219,7 @@
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(a.href);
     }
+    const last10On = () => ($('last10').checked ? '1' : '0');
     const fullPath = (folder, file) => {
         if (!folder) return file;
         const sep = folder.includes('\\') ? '\\' : '/';
@@ -230,7 +234,7 @@
     }
     function saveSearch(numbers) {
         try {
-            if (numbers.length < 1500000) localStorage.setItem(STORE_KEY, JSON.stringify({ input: numbers, sort: $('fileSort').value }));
+            if (numbers.length < 1500000) localStorage.setItem(STORE_KEY, JSON.stringify({ input: numbers, sort: $('fileSort').value, last10: last10On() }));
         } catch (e) { /* private mode / storage full: koi baat nahi */ }
     }
     function forgetSearch() { try { localStorage.removeItem(STORE_KEY); } catch (e) {} }
@@ -270,6 +274,7 @@
         const fd = new FormData();
         fd.append('file', file);
         fd.append('first_col', $('firstColOnly').checked ? '1' : '');
+        fd.append('last10', last10On());
         fd.append('csrfmiddlewaretoken', csrf);
         const res = await fetch(urls.fileReport, { method: 'POST', body: fd });
         if (!res.ok) {
@@ -286,7 +291,7 @@
         uploadBtn.disabled = true;
         setNote('Reading ' + file.name + '...');
         try {
-            const data = await post(urls.extract, { file, first_col: $('firstColOnly').checked ? '1' : '' });
+            const data = await post(urls.extract, { file, first_col: $('firstColOnly').checked ? '1' : '', last10: last10On() });
             if (!data.numbers.length) {
                 setNote('No numbers found in ' + data.file + '.', true);
             } else if (data.truncated && confirm(
@@ -365,6 +370,7 @@
         tags.appendChild(el('span', 'Sheet: ' + (m.sheet || '-'), 'tag'));
         tags.appendChild(el('span', 'Row: ' + m.row, 'tag'));
         if (m.column) tags.appendChild(el('span', 'Column: ' + m.column, 'tag'));
+        if (m.stored) tags.appendChild(el('span', 'Found as ' + m.stored, 'tag found-as'));
         if (m.modified) tags.appendChild(el('span', 'Modified: ' + m.modified, 'tag muted'));
         const btn = el('button', 'View full row', 'link-btn');
         btn.type = 'button';
@@ -405,13 +411,13 @@
             const nums = f.numbers.slice(loadedUpTo, loadedUpTo + DETAIL_PAGE);
             foot.textContent = 'Loading...';
             try {
-                const data = await post(urls.fileLocations, { file_id: f.file_id, numbers: nums.join('\n') });
+                const data = await post(urls.fileLocations, { file_id: f.file_id, numbers: nums.join('\n'), last10: state.last10 });
                 data.items.forEach((item) => {
                     const tr = table.insertRow();
                     tr.insertCell().appendChild(el('b', item.number));
                     const td = tr.insertCell();
                     item.locations.forEach((loc) => td.appendChild(buildLocation(
-                        { file_id: f.file_id, sheet: loc.sheet, row: loc.row, col: loc.col, column: loc.column }, false)));
+                        { file_id: f.file_id, sheet: loc.sheet, row: loc.row, col: loc.col, column: loc.column, stored: loc.stored }, false)));
                 });
                 loadedUpTo += nums.length;
                 renderFoot();
@@ -656,6 +662,7 @@
         try {
             const fd = new FormData();
             fd.append('numbers', state.input);
+            fd.append('last10', state.last10);
             fd.append('csrfmiddlewaretoken', csrf);
             const res = await fetch(urls.exportXlsx, { method: 'POST', body: fd });
             if (!res.ok) {
@@ -680,12 +687,13 @@
         searchBtn.classList.add('busy');
         searchText.textContent = 'Searching...';
         try {
-            const data = await post(urls.search, { numbers });
+            const data = await post(urls.search, { numbers, last10: last10On() });
             state.allFiles = data.files;
             $('fileFilter').value = '';
             state.results = data.results;
             state.missing = data.not_found;
             state.input = numbers;
+            state.last10 = data.summary.last10 ? '1' : '0';
             state.detail = data.summary.detail;
             state.filter = 'all';
             state.fileShown = PAGE;
@@ -722,6 +730,7 @@
         try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (e) {}
         if (!saved || typeof saved.input !== 'string' || !saved.input.trim()) return;
         if (['count', 'name', 'newest'].includes(saved.sort)) $('fileSort').value = saved.sort;
+        if (saved.last10 === '0') $('last10').checked = false;
         input.value = saved.input;
         updateCounter();
         const note = $('restoreNote');

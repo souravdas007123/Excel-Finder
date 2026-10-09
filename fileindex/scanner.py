@@ -9,7 +9,7 @@ from concurrent.futures.process import BrokenProcessPool
 from django.conf import settings
 from django.db import connection, transaction
 
-from .excel_parser import HAS_CALAMINE, parse_file, read_row  # noqa: F401  (read_row views.py use karta hai)
+from .excel_parser import HAS_CALAMINE, match_key, parse_file, read_row  # noqa: F401  (read_row views.py use karta hai)
 from .models import FileIndex, NumberIndex, ScanTask
 
 logger = logging.getLogger(__name__)
@@ -55,9 +55,9 @@ def _make_pool():
 def _store(path, name, stat, hits):
     """File ke numbers DB me daalta hai. Raw executemany, Django model objects se kaafi fast."""
     qn = connection.ops.quote_name
-    sql = "INSERT INTO {} ({}) VALUES (%s, %s, %s, %s, %s)".format(
+    sql = "INSERT INTO {} ({}) VALUES (%s, %s, %s, %s, %s, %s)".format(
         qn(NumberIndex._meta.db_table),
-        ", ".join(qn(c) for c in ("file_id", "number", "sheet", "row", "col")),
+        ", ".join(qn(c) for c in ("file_id", "number", "match_key", "sheet", "row", "col")),
     )
     with transaction.atomic():
         obj, _ = FileIndex.objects.update_or_create(
@@ -71,7 +71,7 @@ def _store(path, name, stat, hits):
                 for i in range(0, len(hits), STORE_BATCH):
                     if cancel_event.is_set():
                         raise ScanCancelled()   # atomic block rollback ho jayega, adhoori file index me nahi rehti
-                    cur.executemany(sql, [(obj.id, n, s, r, c) for n, s, r, c in hits[i:i + STORE_BATCH]])
+                    cur.executemany(sql, [(obj.id, n, match_key(n), s, r, c) for n, s, r, c in hits[i:i + STORE_BATCH]])
 
 
 def run_scan(task_id, root):

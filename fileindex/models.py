@@ -18,6 +18,7 @@ class NumberIndex(models.Model):
     """Har number ki alag row -> search indexed aur exact match hota hai."""
     file = models.ForeignKey(FileIndex, on_delete=models.CASCADE, related_name="numbers")
     number = models.CharField(max_length=32, db_index=True)
+    match_key = models.CharField(max_length=32, db_index=True, default="")   # aakhri 10 digits (country code ignore)
     sheet = models.CharField(max_length=100, blank=True)
     row = models.PositiveIntegerField()
     col = models.PositiveSmallIntegerField(default=0)  # 1 = column A
