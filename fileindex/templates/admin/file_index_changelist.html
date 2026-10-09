@@ -78,6 +78,34 @@
     .btn-danger.busy .spinner { display: inline-block; }
 
     @media (max-width: 640px) { .scan-controls { flex-direction: column; align-items: stretch; } }
+    /* ===== Confirm popup (Clear File Index) ===== */
+    .confirm-overlay {
+        position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center;
+        padding: 16px; background: rgba(0, 0, 0, 0.5);
+    }
+    .confirm-overlay[hidden] { display: none; }
+    .confirm-box {
+        width: 100%; max-width: 440px; padding: 24px; border-radius: 10px;
+        background: var(--body-bg, #fff); color: var(--body-fg, #333);
+        border: 1px solid var(--border-color, #e0e0e0); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    }
+    .confirm-icon {
+        width: 44px; height: 44px; border-radius: 50%; margin-bottom: 14px;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(220, 53, 69, 0.15); color: #dc3545;
+    }
+    .confirm-title { margin: 0 0 8px; font-size: 18px; font-weight: 700; }
+    .confirm-text { margin: 0; font-size: 14px; line-height: 1.55; color: var(--body-quiet-color, #666); }
+    .confirm-text b { color: var(--body-fg, #333); }
+    .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+    .confirm-actions button {
+        height: 40px; padding: 0 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .confirm-cancel { background: transparent; color: var(--body-fg, #333); border: 1px solid var(--border-color, #ccc); }
+    .confirm-cancel:hover { border-color: #417690; }
+    .confirm-ok { background: #dc3545; color: #fff; border: 1px solid #dc3545; }
+    .confirm-ok:hover { background: #bb2d3b; border-color: #bb2d3b; }
+    .confirm-actions button:focus-visible { outline: 3px solid rgba(65, 118, 144, 0.5); outline-offset: 2px; }
 </style>
 
 <div class="custom-tools-wrapper">
@@ -161,6 +189,21 @@
     </div>
 </div>
 
+<!-- Confirm popup: Clear File Index -->
+<div id="confirmOverlay" class="confirm-overlay" hidden>
+    <div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+        <div class="confirm-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+        </div>
+        <h3 id="confirmTitle" class="confirm-title"></h3>
+        <p id="confirmText" class="confirm-text"></p>
+        <div class="confirm-actions">
+            <button id="confirmCancel" type="button" class="confirm-cancel">Cancel</button>
+            <button id="confirmOk" type="button" class="confirm-ok">Yes, clear index</button>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     const $ = (id) => document.getElementById(id);
@@ -187,6 +230,43 @@
     const card = $('scanCard'), scanBtn = $('scanBtn'), btnText = $('btnText');
     const select = $('driveSelect'), panel = $('scanPanel'), statusEl = $('scanStatus');
     const clearBtn = $('clearIndexBtn'), customBox = $('customBox'), stopBtn = $('stopScanBtn');
+
+    // Apna confirm popup (browser ke confirm() ki jagah). Promise<boolean> deta hai.
+    function confirmDialog({ title, html, okText }) {
+        const overlay = $('confirmOverlay'), ok = $('confirmOk'), cancel = $('confirmCancel');
+        $('confirmTitle').textContent = title;
+        $('confirmText').innerHTML = html;   // sirf is file ka apna text, user input nahi
+        ok.textContent = okText;
+        const opener = document.activeElement;
+        overlay.hidden = false;
+        cancel.focus();   // galti se Enter dabane par bhi delete na ho
+
+        return new Promise((resolve) => {
+            function close(result) {
+                overlay.hidden = true;
+                ok.removeEventListener('click', onOk);
+                cancel.removeEventListener('click', onCancel);
+                overlay.removeEventListener('mousedown', onOverlay);
+                document.removeEventListener('keydown', onKey, true);
+                if (opener && opener.focus) opener.focus();
+                resolve(result);
+            }
+            const onOk = () => close(true);
+            const onCancel = () => close(false);
+            const onOverlay = (e) => { if (e.target === overlay) close(false); };
+            function onKey(e) {
+                if (e.key === 'Escape') { e.preventDefault(); close(false); }
+                else if (e.key === 'Tab') {   // focus popup ke andar hi ghume
+                    e.preventDefault();
+                    (document.activeElement === ok ? cancel : ok).focus();
+                }
+            }
+            ok.addEventListener('click', onOk);
+            cancel.addEventListener('click', onCancel);
+            overlay.addEventListener('mousedown', onOverlay);
+            document.addEventListener('keydown', onKey, true);
+        });
+    }
 
     function setStatus(text, color) {
         statusEl.textContent = text || '';
@@ -285,8 +365,15 @@
     /* ---------- CLEAR INDEX ---------- */
     if (clearBtn) {
         clearBtn.addEventListener('click', async () => {
-            if (!confirm('Delete ALL indexed data?\n\nYour Excel files on disk will NOT be deleted, ' +
-                         'but you will need to run a scan again before you can search.')) return;
+            const count = {{ stats.files|default:0 }};
+            const yes = await confirmDialog({
+                title: 'Clear the file index?',
+                html: (count ? `This removes <b>all ${count.toLocaleString()} indexed file${count === 1 ? '' : 's'}</b> and their numbers from the database. `
+                             : 'This removes all indexed data from the database. ') +
+                      'Your Excel files on disk are <b>not</b> deleted, but you will need to run a scan again before you can search.',
+                okText: 'Yes, clear index',
+            });
+            if (!yes) return;
             lockControls(true);   // Start Scan, dropdown, folder box sab disable
             clearBtn.classList.add('busy');
             $('clearText').textContent = 'Clearing...';
