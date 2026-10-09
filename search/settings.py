@@ -102,6 +102,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'search.middleware.FirstRunSetupMiddleware',   # koi user nahi (pehli baar) toh /setup/
     'licensing.middleware.LicenseMiddleware',   # license khatam ho toh pages band (LICENSE_ENFORCED ho tabhi)
+    'search.middleware.UpdateCheckMiddleware',  # roz ek baar 'naya version?' (UPDATE_CHECK_URL ho tabhi)
 ]
 if FROZEN:   # installed app me static files (admin ka CSS/JS) WhiteNoise dega, kyunki DEBUG band hai
     MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
@@ -118,6 +119,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'search.context_processors.update_notice',
             ],
         },
     },
@@ -217,14 +219,17 @@ if _license_build is not None:
     LICENSE_PUBLIC_KEY = getattr(_license_build, "PUBLIC_KEY", "")
     LICENSE_BUY_URL = getattr(_license_build, "BUY_URL", "")
     LICENSE_SUPPORT = getattr(_license_build, "SUPPORT", "")
+    UPDATE_CHECK_URL = getattr(_license_build, "UPDATE_URL", "")
 else:
     LICENSE_ENFORCED = _env_bool("EXCEL_FINDER_LICENSE_ENFORCED", False)
     LICENSE_SERVER_URL = os.environ.get("EXCEL_FINDER_LICENSE_SERVER", "")
     LICENSE_PUBLIC_KEY = os.environ.get("EXCEL_FINDER_LICENSE_PUBLIC_KEY", "")
     LICENSE_BUY_URL = os.environ.get("EXCEL_FINDER_LICENSE_BUY_URL", "")
     LICENSE_SUPPORT = os.environ.get("EXCEL_FINDER_LICENSE_SUPPORT", "")
+    UPDATE_CHECK_URL = os.environ.get("EXCEL_FINDER_UPDATE_URL", "")
 LICENSE_CHECK_INTERVAL_HOURS = 24   # app online ho toh itne ghante me ek baar server se check
 LICENSE_WARN_DAYS = 14              # expiry se itne din pehle chetavni
+UPDATE_CACHE_FILE = DATA_DIR / 'update_info.json'   # 'naya version' ki jaankari (chhoti JSON file)
 
 if FROZEN:   # windowed .exe me console nahi hota: log file me jaate hain
     LOGGING = {

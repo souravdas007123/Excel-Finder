@@ -1,0 +1,50 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block branding %}
+<div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header|default:_('Django administration') }}</a></div>
+{% if user.is_anonymous %}
+  {% include "admin/color_theme_toggle.html" %}
+{% endif %}
+{% endblock %}
+
+{% block nav-global %}{% endblock %}
+
+{# 'Naya version available hai' banner: sab admin pages ke upar (search/update_check.py) #}
+{% block messages %}
+{% if update_notice %}
+<style>
+    .update-banner { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin: 0 0 14px; padding: 12px 16px;
+        border-radius: 8px; font-size: 14px; line-height: 1.5; color: var(--body-fg, #333);
+        background: rgba(65, 118, 144, .12); border: 1px solid rgba(65, 118, 144, .45); }
+    .update-banner.critical { background: rgba(220, 53, 69, .12); border-color: rgba(220, 53, 69, .55); }
+    .update-banner .ub-text { flex: 1; min-width: 240px; }
+    .update-banner ul { margin: 6px 0 0 18px; padding: 0; }
+    .update-banner .ub-actions { display: flex; gap: 8px; align-items: center; }
+    .update-banner a.ub-btn, .update-banner button { display: inline-block; height: 36px; line-height: 34px; padding: 0 16px; border-radius: 6px;
+        font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; border: 1px solid #417690; }
+    .update-banner a.ub-btn { background: #417690; color: #fff; }
+    .update-banner button { background: transparent; color: var(--body-fg, #333); border-color: var(--border-color, #bbb); }
+    .update-banner form { margin: 0; }
+</style>
+<div class="update-banner{% if update_notice.critical %} critical{% endif %}" role="status">
+    <div class="ub-text">
+        <b>Excel Finder {{ update_notice.version }} is available</b> (you have {{ update_notice.current }}).
+        {% if update_notice.critical %}<b>This update is required: your version is no longer supported.</b>{% endif %}
+        {% if update_notice.notes %}<ul>{% for note in update_notice.notes %}<li>{{ note }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+    <div class="ub-actions">
+        <a class="ub-btn" href="{{ update_notice.download_url }}" target="_blank" rel="noopener noreferrer">Download</a>
+        {% if not update_notice.critical %}
+        <form method="post" action="{% url 'update_dismiss' %}">{% csrf_token %}
+            <input type="hidden" name="version" value="{{ update_notice.version }}">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button type="submit">Not now</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{{ block.super }}
+{% endblock messages %}

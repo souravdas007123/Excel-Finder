@@ -22,3 +22,18 @@ class FirstRunSetupMiddleware:
             if not _users_exist and not request.path.startswith(("/setup/", "/static/")):
                 return redirect("/setup/")
         return self.get_response(request)
+
+
+class UpdateCheckMiddleware:
+    """Login kiye hue staff ke admin page kholne par roz ek baar (alag thread me) 'naya version?' dekhta hai."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        user = getattr(request, "user", None)
+        if request.method == "GET" and request.path.startswith("/admin/") and user is not None \
+                and user.is_authenticated and user.is_staff:
+            from . import update_check
+            update_check.maybe_background_check()
+        return self.get_response(request)

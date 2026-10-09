@@ -12,7 +12,8 @@
 
 .EXAMPLE
     .\installer\build_windows.ps1 -ServerUrl https://license.example.com `
-        -PrivateKeyFile license_server\private_key.txt -BuyUrl https://example.com/buy -Support help@example.com
+        -PrivateKeyFile license_server\private_key.txt -BuyUrl https://example.com/buy -Support help@example.com `
+        -UpdateUrl https://example.com/latest.json
 
 .EXAMPLE
     # Sirf apne PC par test (license server local, http):
@@ -24,6 +25,7 @@ param(
     [string]$PrivateKeyFile = "",          # isse public key nikal li jati hai (private key app me nahi jati)
     [string]$BuyUrl = "",
     [string]$Support = "",
+    [string]$UpdateUrl = "",               # website par latest.json ka https address (naye version ke notice ke liye)
     [string]$Publisher = "Excel Finder",
     [switch]$AllowHttp,
     [switch]$SkipTests,
@@ -63,6 +65,7 @@ try {
     if ($PrivateKeyFile) { $cfg += @("--private-key-file", $PrivateKeyFile) } else { $cfg += @("--public-key", $PublicKey) }
     if ($BuyUrl) { $cfg += @("--buy-url", $BuyUrl) }
     if ($Support) { $cfg += @("--support", $Support) }
+    if ($UpdateUrl) { $cfg += @("--update-url", $UpdateUrl) }
     if ($AllowHttp) { $cfg += "--allow-http" }
     Run $py $cfg
 

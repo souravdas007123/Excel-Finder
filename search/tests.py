@@ -202,7 +202,7 @@ class LauncherTests(SimpleTestCase):
                 pass
 
         server = HTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True).start()
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         with tempfile.TemporaryDirectory() as tmp:

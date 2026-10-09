@@ -6,7 +6,7 @@ from django.urls import reverse
 from . import service
 
 ALLOWED_PREFIXES = (
-    "/admin/login/", "/admin/logout/", "/admin/licensing/", "/admin/jsi18n/", "/admin/password_change/",
+    "/admin/login/", "/admin/logout/", "/admin/licensing/", "/admin/jsi18n/", "/admin/password_change/", "/admin/update/",
     "/static/", "/setup/",
 )
 

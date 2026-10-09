@@ -25,11 +25,14 @@ def main():
     group.add_argument("--private-key-file", help="Private key ki file: isse public key nikal li jati hai (private key app me NAHI jati)")
     p.add_argument("--buy-url", default="", help="License page par 'Buy or renew' link")
     p.add_argument("--support", default="", help="License page par support email / phone")
+    p.add_argument("--update-url", default="", help="latest.json ka https address (website/build_site.py banata hai), jaise https://example.com/latest.json")
     p.add_argument("--allow-http", action="store_true", help="Sirf testing: http server address")
     p.add_argument("--out", default=str(ROOT / "licensing" / "build_config.py"), help=argparse.SUPPRESS)
     args = p.parse_args()
 
     server = args.server.strip().rstrip("/")
+    if args.update_url and not (args.update_url.startswith("https://") or (args.allow_http and args.update_url.startswith("http://"))):
+        p.error("--update-url https:// se shuru hona chahiye")
     if not server.startswith("https://") and not (args.allow_http and server.startswith("http://")):
         p.error("--server https:// se shuru hona chahiye (testing ke liye --allow-http)")
     if args.private_key_file:
@@ -49,7 +52,8 @@ def main():
         f"SERVER_URL = {server!r}\n"
         f"PUBLIC_KEY = {public!r}\n"
         f"BUY_URL = {args.buy_url!r}\n"
-        f"SUPPORT = {args.support!r}\n", encoding="utf-8")
+        f"SUPPORT = {args.support!r}\n"
+        f"UPDATE_URL = {args.update_url.strip()!r}\n", encoding="utf-8")
     print(f"Written {out}\n  server : {server}\n  public : {public}")
 
 

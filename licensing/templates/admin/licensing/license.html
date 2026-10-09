@@ -105,6 +105,15 @@
 {% endif %}
 
 <div class="premium-card lic-card">
+    <h3>Version</h3>
+    <p class="lic-small" style="margin:0 0 10px">You are using Excel Finder <b>{{ version }}</b>.</p>
+    <form method="post" action="{% url 'update_check' %}">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button class="btn-secondary" type="submit" style="height:40px;padding:0 20px">Check for updates</button>
+    </form>
+</div>
+
+<div class="premium-card lic-card">
     <h3>What the license check sends</h3>
     <p class="lic-small" style="margin:0">To verify your license, this app contacts <code>{{ server_url|default:"the license server" }}</code> and sends only:
         your <b>license key</b>, this <b>PC&rsquo;s anonymous ID</b> and <b>name</b>, the <b>app version</b> ({{ version }}), and two <b>counters</b>
