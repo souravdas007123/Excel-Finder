@@ -130,7 +130,10 @@ def run_scan(task_id, root):
         # Trailing separator zaruri: 'D:\\Data' scan karte waqt 'D:\\Data2' ki files na chhui jayein
         prefix = root if root.endswith(os.sep) else root + os.sep
         if connection.vendor == "sqlite":
-            connection.cursor().execute("PRAGMA synchronous=NORMAL")  # WAL ke saath safe aur fast
+            try:
+                connection.cursor().execute("PRAGMA synchronous=NORMAL")  # WAL ke saath safe aur fast
+            except Exception:
+                pass   # sirf speed tuning hai (transaction ke andar SQLite ye nahi badalne deta); scan nahi rukna chahiye
 
         existing = {
             p: (s, m, v)
