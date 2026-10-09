@@ -192,7 +192,7 @@
 <!-- Confirm popup: Clear File Index -->
 <div id="confirmOverlay" class="confirm-overlay" hidden>
     <div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText">
-        <div class="confirm-icon">
+        <div id="confirmIcon" class="confirm-icon">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
         </div>
         <h3 id="confirmTitle" class="confirm-title"></h3>
@@ -232,11 +232,17 @@
     const clearBtn = $('clearIndexBtn'), customBox = $('customBox'), stopBtn = $('stopScanBtn');
 
     // Apna confirm popup (browser ke confirm() ki jagah). Promise<boolean> deta hai.
-    function confirmDialog({ title, html, okText }) {
+    const ICONS = {
+        trash: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>',
+        stop: '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+    };
+    function confirmDialog({ title, html, okText, cancelText, icon }) {
         const overlay = $('confirmOverlay'), ok = $('confirmOk'), cancel = $('confirmCancel');
         $('confirmTitle').textContent = title;
         $('confirmText').innerHTML = html;   // sirf is file ka apna text, user input nahi
         ok.textContent = okText;
+        cancel.textContent = cancelText || 'Cancel';
+        $('confirmIcon').innerHTML = ICONS[icon || 'trash'];
         const opener = document.activeElement;
         overlay.hidden = false;
         cancel.focus();   // galti se Enter dabane par bhi delete na ho
@@ -295,7 +301,14 @@
     }
 
     stopBtn.addEventListener('click', async () => {
-        if (!confirm('Stop the scan?\n\nFiles that are already indexed will be kept.')) return;
+        const yes = await confirmDialog({
+            title: 'Stop the scan?',
+            html: 'Files that are <b>already indexed will be kept</b>. The file being read right now is skipped, and you can run the scan again later to pick up the rest.',
+            okText: 'Yes, stop scan',
+            cancelText: 'Keep scanning',
+            icon: 'stop',
+        });
+        if (!yes) return;
         stopBtn.disabled = true;
         stopBtn.textContent = 'Stopping...';
         try {
@@ -372,6 +385,7 @@
                              : 'This removes all indexed data from the database. ') +
                       'Your Excel files on disk are <b>not</b> deleted, but you will need to run a scan again before you can search.',
                 okText: 'Yes, clear index',
+                icon: 'trash',
             });
             if (!yes) return;
             lockControls(true);   // Start Scan, dropdown, folder box sab disable

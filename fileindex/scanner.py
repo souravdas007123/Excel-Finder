@@ -29,6 +29,20 @@ PROGRESS_FIELDS = ["folders_scanned", "files_indexed", "files_skipped", "files_f
 scan_lock = threading.Lock()
 # Stop Scan button isse scan ko rukne ka signal deta hai
 cancel_event = threading.Event()
+STORE_BATCH = 20_000   # badi file ek saath nahi, itni-itni rows me DB me likhte hain (beech me Stop check ho sake)
+
+
+class ScanCancelled(Exception):
+    """Stop dabne par chalti hui file ka DB write rok kar rollback karne ke liye."""
+
+
+def _kill_workers(pool):
+    """Stop par worker processes turant band karo (warna badi file padhne wale worker minutes tak chalte rehte hain)."""
+    try:
+        for proc in list(getattr(pool, "_processes", {}).values()):
+            proc.terminate()
+    except Exception:
+        logger.exception("Could not stop worker processes")
 
 
 def _make_pool():
@@ -54,7 +68,10 @@ def _store(path, name, stat, hits):
         NumberIndex.objects.filter(file=obj).delete()
         if hits:
             with connection.cursor() as cur:
-                cur.executemany(sql, [(obj.id, n, s, r, c) for n, s, r, c in hits])
+                for i in range(0, len(hits), STORE_BATCH):
+                    if cancel_event.is_set():
+                        raise ScanCancelled()   # atomic block rollback ho jayega, adhoori file index me nahi rehti
+                    cur.executemany(sql, [(obj.id, n, s, r, c) for n, s, r, c in hits[i:i + STORE_BATCH]])
 
 
 def run_scan(task_id, root):
@@ -86,6 +103,8 @@ def run_scan(task_id, root):
             try:
                 _store(path, name, stat, hits)
                 task.files_indexed += 1
+            except ScanCancelled:
+                pass   # Stop dabaya gaya; loops cancel_event dekh kar ruk jayenge
             except Exception as exc:
                 task.files_failed += 1
                 logger.warning("DB write failed for %s: %s", path, exc)
@@ -94,7 +113,11 @@ def run_scan(task_id, root):
             """Pending futures ko 'limit' tak kam karo; jo file padhi ja chuki hai use DB me likho."""
             nonlocal pool
             while len(pending) > limit:
-                done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                if cancel_event.is_set():
+                    return
+                done, _ = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)   # timeout: beech me Stop dekh sakein
+                if not done:
+                    continue
                 broken = False
                 for fut in done:
                     path, name, stat = pending.pop(fut)
@@ -110,6 +133,8 @@ def run_scan(task_id, root):
                         logger.warning("Failed to read %s: %s", path, exc)
                         continue
                     save_result(path, name, stat, hits)
+                    if cancel_event.is_set():
+                        return
                 if broken:  # crashed pool badal do
                     pool.shutdown(wait=False)
                     pool = _make_pool()
@@ -159,7 +184,13 @@ def run_scan(task_id, root):
                     task.save(update_fields=PROGRESS_FIELDS)
                     last_save = time.monotonic()
 
+        if not cancelled:
+            drain(0)   # bachi hui files poori karo
+            cancelled = cancel_event.is_set()   # drain ke dauraan Stop dabaya ho toh bhi cancel maano
+
         if cancelled:
+            if pool is not None:
+                _kill_workers(pool)
             # Adhoori padhi files chhod do. Jo index ban chuka hai wo rahega. Deleted-files ki safai nahi karte,
             # kyunki scan poora nahi hua (warna na-scan hui files galti se index se hat jaati).
             pending.clear()
@@ -167,8 +198,6 @@ def run_scan(task_id, root):
             task.message = "Stopped by user"
             task.save(update_fields=PROGRESS_FIELDS + ["status"])
         else:
-            drain(0)  # bachi hui files poori karo
-
             # Disk se delete ho chuki files ko index se hatao
             stale = [p for p in existing if p not in seen]
             for i in range(0, len(stale), 500):
