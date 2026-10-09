@@ -18,7 +18,8 @@ PowerShell me project folder se:
     -ServerUrl https://license.example.com `
     -PrivateKeyFile license_server\private_key.txt `
     -BuyUrl https://example.com/buy `
-    -Support help@example.com
+    -Support help@example.com `
+    -UpdateUrl https://example.com/latest.json
 ```
 
 Ye script apne aap:
@@ -30,6 +31,8 @@ Ye script apne aap:
 6. bane hue app ko **ek baar chalakar check karta hai** (nahi chala toh installer nahi banta),
 7. Inno Setup se `dist\installer\ExcelFinder-Setup-<version>.exe` banata hai,
 8. aakhir me `build_config.py` hata deta hai, taaki aapki apni source copy me license check na lage.
+
+**`-UpdateUrl`** website ki `latest.json` ka address hai (`website/README.md`): isse app naye version ka notice dikhata hai. **Pehle hi installer me dena zaruri hai**, baad me badla nahi ja sakta (installer ke andar band ho jata hai).
 
 Version badalna ho toh `search\version.py` me `VERSION` badlo.
 

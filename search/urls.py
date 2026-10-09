@@ -4,6 +4,10 @@ from django.views.generic import RedirectView
 from fileindex import views 
 from . import setup_views, update_views
 
+admin.site.site_header = 'Excel Finder'       # upar ki bar me 'Django administration' ki jagah
+admin.site.site_title = 'Excel Finder'
+admin.site.index_title = 'Welcome'
+
 urlpatterns = [
     path('', RedirectView.as_view(url='/admin/')),
     path('setup/', setup_views.setup, name='setup'),

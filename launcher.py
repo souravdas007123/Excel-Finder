@@ -27,6 +27,8 @@ def data_dir():
     if getattr(sys, "frozen", False):
         base = os.environ.get("EXCEL_FINDER_DATA") or (Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "ExcelFinder")
         path = Path(base)
+    elif os.environ.get("EXCEL_FINDER_DATA"):
+        path = Path(os.environ["EXCEL_FINDER_DATA"])
     else:
         path = Path(__file__).resolve().parent
     path.mkdir(parents=True, exist_ok=True)

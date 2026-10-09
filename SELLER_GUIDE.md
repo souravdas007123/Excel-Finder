@@ -21,6 +21,11 @@ App roz (online ho toh) license server se check karta hai ──> aap revoke / r
 3. **Installer banao**: `installer/README.md` (ek command).
 4. **Windows par test karo** saaf PC / VM me, **sign karo**, phir bechna shuru.
 
+## Website aur updates
+* **Website** (`website/`): landing + download + pricing + FAQ + Privacy / Terms. `website/README.md` me poora tareeka: details bharo, `python website/build_site.py`, folder ko Cloudflare Pages / Netlify par daalo. Setup.exe ko alag jagah (R2 / S3 / apna server) rakho aur uska https link config me do.
+* **Naye version ka notice:** website ki `latest.json` se app apne aap (roz ek baar) "Excel Finder X is available" banner dikhata hai (notes + Download). Kuch bhi apne aap install nahi hota. **Pehle installer me hi `-UpdateUrl` dena zaruri hai**, nahi toh purane customers ko notice nahi milega.
+* `min_version` set karoge toh us se purane version par banner laal aur "zaruri" ho jata hai.
+
 ## License ke prakar
 | Prakar | Kaise chalta hai | Kab use karein |
 |---|---|---|

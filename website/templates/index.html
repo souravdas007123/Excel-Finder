@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ product_name }}: {{ tagline }}</title>
+<meta name="description" content="{{ meta_description }}">
+{{ robots_html }}
+<link rel="canonical" href="{{ site_url }}/">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#417690">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ product_name }}: {{ tagline }}">
+<meta property="og:description" content="{{ meta_description }}">
+<meta property="og:url" content="{{ site_url }}/">
+<meta property="og:image" content="{{ site_url }}/assets/shot-search.png">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+{{ preview_banner_html }}
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="assets/favicon.svg" width="30" height="30" alt="">{{ product_name }}</a>
+    <nav class="nav" aria-label="Main">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#pricing">Pricing</a>
+      <a class="hide-sm" href="#faq">FAQ</a>
+      <a class="btn small" href="#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div id="top"></div>
+<section class="hero">
+  <div class="wrap">
+    <h1>Find any phone number across <em>all your Excel files</em>, in seconds</h1>
+    <p class="lead">Paste hundreds of numbers. {{ product_name }} shows you <strong>which files contain them</strong>, how many from each file,
+      and the exact sheet, row and column. Everything runs on your own PC.</p>
+    <div class="cta">
+      <a class="btn" href="#download">Download free trial</a>
+      <a class="btn ghost" href="#pricing">See pricing</a>
+    </div>
+    <p class="trust">{{ trial_days }}-day free trial &middot; No credit card &middot; Works on your PC, your files never leave it</p>
+    <figure class="frame">
+      <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
+      {{ hero_img_html }}
+    </figure>
+  </div>
+</section>
+
+<section class="stats-band" aria-label="Speed">
+  <div class="wrap">
+    <div class="stats">
+      <div><b>25 million</b><span>numbers indexed in our largest test</span></div>
+      <div><b>Under 1 second</b><span>to search 2,000 numbers against them</span></div>
+      <div><b>.xlsx .xlsm .xls .xlsb</b><span>Excel formats it can read</span></div>
+    </div>
+    <p class="stats-note">Measured with 12 Excel files of 700,000 rows each on a development PC. Your speed depends on your computer and disk.</p>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Built for people who live in spreadsheets</h2>
+    <p class="sub">No more opening files one by one and pressing Ctrl+F. Scan your folders once, then search as many lists as you like.</p>
+    <div class="grid f3">
+      <div class="card"><div class="icon" aria-hidden="true">&#128193;</div><h3>Files first, details next</h3>
+        <p>See which files contain your numbers and how many from each, then open any file to see the sheet, row, column and the full row.</p></div>
+      <div class="card"><div class="icon" aria-hidden="true">&#128203;</div><h3>Search lists in bulk</h3>
+        <p>Paste numbers or load a list from Excel, CSV or text. Up to 2,000 numbers are shown on screen; bigger lists get a full Excel report.</p></div>
+      <div class="card"><div class="icon" aria-hidden="true">&#128222;</div><h3>Made for phone numbers</h3>
+        <p>+91 98765 43210, 09876543210 and 9876543210 are treated as the same number, so formatting never hides a match. You can turn this off.</p></div>
+      <div class="card"><div class="icon" aria-hidden="true">&#9889;</div><h3>Scan once, search often</h3>
+        <p>Pick a drive or folder and let it index. Next time only changed files are read again. You can see progress and stop any time.</p></div>
+      <div class="card"><div class="icon" aria-hidden="true">&#128202;</div><h3>Clean Excel report</h3>
+        <p>Export a formatted report: a summary, a by-file sheet with clickable file links, every match with its location, and a not-found list.</p></div>
+      <div class="card"><div class="icon" aria-hidden="true">&#128274;</div><h3>Private by design</h3>
+        <p>Your files, file names and the numbers you search never leave your PC. The licence check sends only your key, an anonymous PC ID and usage counts.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="soft">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="sub">Three steps, no technical knowledge needed.</p>
+    <ol class="steps">
+      <li><b>Scan your folders</b><span>Choose a drive or folder. {{ product_name }} reads .xlsx, .xlsm, .xls and .xlsb files and remembers every number.</span></li>
+      <li><b>Paste your numbers</b><span>Type or paste a list, or upload one. Duplicates and formatting differences are handled for you.</span></li>
+      <li><b>See where they are</b><span>Get the list of files with counts first. Click a file for exact locations, copy results, or export a report.</span></li>
+    </ol>
+  </div>
+</section>
+
+<section id="screens">
+  <div class="wrap">
+    <h2>See it in action</h2>
+    <p class="sub">Real screens from the app, shown with sample data.</p>
+    <div class="shots">{{ shots_html }}</div>
+  </div>
+</section>
+
+<section id="pricing" class="soft">
+  <div class="wrap">
+    <h2>Simple pricing</h2>
+    <p class="sub">One licence works on one PC. Try everything free first.</p>
+    <div class="plans">{{ plans_html }}</div>
+    <p class="fine">{{ pricing_fine }}</p>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Download {{ product_name }}</h2>
+    <p class="sub">Start the {{ trial_days }}-day free trial. No key needed: it begins with one click inside the app.</p>
+    <div class="dl">{{ download_html }}</div>
+  </div>
+</section>
+
+<section id="faq" class="soft">
+  <div class="wrap">
+    <h2>Questions</h2>
+    <p class="sub">Still unsure? Write to <a href="mailto:{{ support_email }}">{{ support_email }}</a>{{ whatsapp_inline_html }}.</p>
+    {{ faq_html }}
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>&copy; {{ year }} {{ company }}. All rights reserved.</div>
+    <div><a href="privacy.html">Privacy Policy</a> &middot; <a href="terms.html">Terms</a> &middot; <a href="mailto:{{ support_email }}">{{ support_email }}</a></div>
+  </div>
+</footer>
+</body>
+</html>

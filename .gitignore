@@ -15,3 +15,4 @@ secret.key
 excel-finder.log*
 launcher.log
 update_info.json
+website/dist/

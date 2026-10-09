@@ -19,7 +19,7 @@ from .views import MAX_NUMBERS, custom_path_allowed
 class FileIndexAdmin(admin.ModelAdmin):
     list_display = ("file_name", "file_path", "file_size", "last_scanned")
     search_fields = ("file_name", "file_path")
-    search_help_text = "File name, path, ya number (exact match) se search karo. Kai numbers comma/space se alag karo."
+    search_help_text = "Search by file name, path or number (matched on the last 10 digits). Separate several numbers with a comma or space."
     list_per_page = 50
     show_full_result_count = False   # badi table par extra COUNT query nahi chalegi
     change_list_template = "admin/file_index_changelist.html"

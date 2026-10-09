@@ -27,6 +27,9 @@ FROZEN = bool(getattr(sys, "frozen", False))
 if FROZEN:
     DATA_DIR = Path(os.environ.get("EXCEL_FINDER_DATA") or (Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "ExcelFinder"))
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+elif os.environ.get("EXCEL_FINDER_DATA"):    # alag data folder (jaise screenshots / testing ke liye), asli database ko chhue bina
+    DATA_DIR = Path(os.environ["EXCEL_FINDER_DATA"])
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 else:
     DATA_DIR = BASE_DIR     # apne computer par pehle jaisa: db.sqlite3 project folder me
 
