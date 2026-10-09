@@ -69,6 +69,8 @@
     }
 
     .action-row { display: flex; flex-direction: column; gap: 10px; margin-top: auto; }
+    .action-row.inline { flex-direction: row; }
+    .action-row.inline .btn-primary { flex: 1; width: auto; }
 
     .btn-primary {
         background-color: #417690;
@@ -158,69 +160,17 @@
     .row-detail tr.cell-hit td { background: rgba(242,144,0,0.2); font-weight: 700; color: var(--body-fg, #333); }
     .row-detail .foot { padding: 6px 10px; font-size: 12px; color: var(--body-quiet-color, #888); }
 
+    /* ===== Upload row ===== */
+    .upload-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-bottom: 18px; }
+    .upload-row .btn-secondary { padding: 8px 16px; font-size: 13px; }
     .chk { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--body-quiet-color, #777); cursor: pointer; }
     .upload-note { font-size: 13px; color: var(--body-quiet-color, #777); }
     .upload-note.err { color: #dc3545; font-weight: 600; }
 
-    /* ===== Guidance banner (Step 2 page) ===== */
-    .bulk-wrap .banner-warn {
-        display: block; box-sizing: border-box; width: 100%;
-        margin: 0 0 18px; padding: 12px 16px; border-radius: 6px;
-        font-size: 14px; line-height: 1.5; text-align: left;
+    /* ===== Guidance banner ===== */
+    .banner-warn {
+        padding: 12px 16px; border-radius: 6px; margin-bottom: 18px; font-size: 14px;
         background: rgba(242, 144, 0, 0.14); border: 1px solid rgba(242, 144, 0, 0.45); color: var(--body-fg, #333);
     }
-    .bulk-wrap .banner-warn b { font-weight: 700; color: inherit; }
-    .bulk-wrap .banner-warn a { color: #417690; font-weight: 700; text-decoration: underline; }
-
-    /* ===== Tabs and file-wise view ===== */
-    .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
-    .tab-btn {
-        background: transparent; border: 1px solid var(--border-color, #ccc); color: var(--body-fg, #333);
-        padding: 7px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
-    }
-    .tab-btn:hover { border-color: #417690; }
-    .tab-btn.active { background: #417690; color: #fff; border-color: #417690; }
-    .pane[hidden], .tab-btn[hidden] { display: none; }
-    .table-scroll { max-height: 650px; overflow-y: auto; border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px; }
-    .result-table.no-stripe tr:nth-child(even) { background: none; }
-    .more-wrap { display: none; text-align: center; margin-top: 12px; }
-
-    .big-num { font-size: 24px; font-weight: 700; color: #417690; line-height: 1.1; }
-    .num-chip {
-        display: inline-block; font-family: ui-monospace, Consolas, Menlo, monospace; font-size: 12px;
-        padding: 2px 9px; border-radius: 10px; background: rgba(128,128,128,0.15); margin: 0 5px 5px 0;
-    }
-    .num-chip.more { background: none; font-family: inherit; color: var(--body-quiet-color, #888); }
-
-    .result-table .detail-row > td { background: rgba(65,118,144,0.07); padding: 10px 14px; }
-    .detail-box table { width: 100%; border-collapse: collapse; box-shadow: none; }
-    .detail-box table td { border: none; border-bottom: 1px solid var(--border-color, #e5e5e5); padding: 8px 10px; background: none; }
-    .detail-box table td:first-child { width: 20%; }
-    .detail-box .foot-note { margin-top: 10px; font-size: 12px; color: var(--body-quiet-color, #888); }
-
-    .missing-box {
-        max-height: 420px; overflow: auto; white-space: pre-wrap; padding: 12px 14px; font-size: 13px;
-        font-family: ui-monospace, Consolas, Menlo, monospace;
-        border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px;
-    }
-    .empty-note { padding: 22px; text-align: center; font-style: italic; color: var(--body-quiet-color, #888); }
-
-    /* ===== Step 2 page layout (Step 1 jaisa compact aur centered) ===== */
-    .bulk-wrap { max-width: 1100px; margin: 0 auto; }
-    .bulk-input { padding: 16px 20px; }
-    .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-    .page-title {
-        display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700;
-        text-transform: uppercase; letter-spacing: 0.5px; color: var(--body-fg, #417690);
-    }
-    .page-head .nav-link { margin: 0; }
-    .page-sub { font-size: 13px; color: var(--body-quiet-color, #888); margin: 4px 0 14px; }
-    .bulk-input textarea.input-field { min-height: 110px; }
-    .input-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-    .input-actions .btn-primary { width: auto; height: 42px; padding: 0 28px; }
-    .input-actions .btn-secondary { height: 42px; padding: 0 18px; }
-    .upload-group { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .bulk-input .upload-note { margin-top: 10px; }
-    .bulk-wrap .result-container { padding: 16px 20px; }
-    .result-table .tool-btn { white-space: nowrap; }
+    .banner-warn a { color: #417690; font-weight: 700; }
 </style>
