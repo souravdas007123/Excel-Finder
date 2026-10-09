@@ -1,0 +1,4 @@
+# Sirf Windows installer banane ke liye (customer ko ye nahi chahiye). Dekho: installer/README.md
+pyinstaller>=6.0
+waitress>=3.0
+whitenoise>=6.6

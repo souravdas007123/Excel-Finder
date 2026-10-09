@@ -3,14 +3,15 @@ import multiprocessing
 import os
 import threading
 import time
+import zipfile
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 
 from django.conf import settings
 from django.db import connection, transaction
 
-from .excel_parser import HAS_CALAMINE, parse_file, read_row  # noqa: F401  (read_row views.py use karta hai)
-from .models import FileIndex, NumberIndex, ScanTask
+from .excel_parser import HAS_CALAMINE, match_key, parse_file, read_row  # noqa: F401  (read_row views.py use karta hai)
+from .models import FileIndex, NumberIndex, ScanFailure, ScanTask
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,29 @@ PROGRESS_FIELDS = ["folders_scanned", "files_indexed", "files_skipped", "files_f
 scan_lock = threading.Lock()
 # Stop Scan button isse scan ko rukne ka signal deta hai
 cancel_event = threading.Event()
+# Scan ke saath alag thread Excel files ginta hai, taaki "kitna baaki" (ETA) dikha sakein. Ek time me ek hi scan.
+scan_progress = {"run": None, "task_id": None, "total": None, "counted": 0}
 STORE_BATCH = 20_000   # badi file ek saath nahi, itni-itni rows me DB me likhte hain (beech me Stop check ho sake)
+
+
+MAX_FAILURES_STORED = 500   # ek scan me itni failed files ki list save hoti hai (count hamesha poora)
+
+
+def _friendly_reason(exc):
+    """Failed file ki wajah aasaan bhasha me (Scan History page par dikhti hai)."""
+    text = str(exc)
+    low = text.lower()
+    if isinstance(exc, PermissionError):
+        return "No permission to read this file (is it open or locked?)"
+    if isinstance(exc, FileNotFoundError):
+        return "File was moved or deleted during the scan"
+    if isinstance(exc, MemoryError):
+        return "File is too big to read (out of memory)"
+    if "password" in low or "encrypt" in low:
+        return "Password-protected file"
+    if isinstance(exc, zipfile.BadZipFile) or "zip" in low or "not a valid" in low or "corrupt" in low:
+        return "File is corrupted or not a real Excel file"
+    return f"{type(exc).__name__}: {text}"[:300]
 
 
 class ScanCancelled(Exception):
@@ -45,6 +68,22 @@ def _kill_workers(pool):
         logger.exception("Could not stop worker processes")
 
 
+def _count_excel_files(root, run):
+    """Background me kul Excel files gino (scan ke saath chalta hai). Scan se zyada tez chalta hai, kyunki file padhni nahi padti."""
+    counted = 0
+    try:
+        for _dirpath, dirnames, filenames in os.walk(root):
+            if cancel_event.is_set() or scan_progress["run"] is not run:
+                return
+            dirnames[:] = [d for d in dirnames if d.lower() not in SKIP_DIRS]
+            counted += sum(1 for f in filenames if not f.startswith("~$") and f.lower().endswith(EXCEL_EXTENSIONS))
+            scan_progress["counted"] = counted
+        if scan_progress["run"] is run:
+            scan_progress["total"] = counted
+    except Exception:
+        logger.exception("Could not count Excel files for the scan estimate")
+
+
 def _make_pool():
     if WORKERS <= 1:
         return None
@@ -55,9 +94,9 @@ def _make_pool():
 def _store(path, name, stat, hits):
     """File ke numbers DB me daalta hai. Raw executemany, Django model objects se kaafi fast."""
     qn = connection.ops.quote_name
-    sql = "INSERT INTO {} ({}) VALUES (%s, %s, %s, %s, %s)".format(
+    sql = "INSERT INTO {} ({}) VALUES (%s, %s, %s, %s, %s, %s)".format(
         qn(NumberIndex._meta.db_table),
-        ", ".join(qn(c) for c in ("file_id", "number", "sheet", "row", "col")),
+        ", ".join(qn(c) for c in ("file_id", "number", "match_key", "sheet", "row", "col")),
     )
     with transaction.atomic():
         obj, _ = FileIndex.objects.update_or_create(
@@ -71,23 +110,30 @@ def _store(path, name, stat, hits):
                 for i in range(0, len(hits), STORE_BATCH):
                     if cancel_event.is_set():
                         raise ScanCancelled()   # atomic block rollback ho jayega, adhoori file index me nahi rehti
-                    cur.executemany(sql, [(obj.id, n, s, r, c) for n, s, r, c in hits[i:i + STORE_BATCH]])
+                    cur.executemany(sql, [(obj.id, n, match_key(n), s, r, c) for n, s, r, c in hits[i:i + STORE_BATCH]])
 
 
 def run_scan(task_id, root):
     """Background thread. Sirf badli/nayi files padhta hai, aur wo bhi parallel processes me."""
     pool = None
     cancelled = False
+    failures = []   # (path, reason): kaun si file fail hui
     cancel_event.clear()
     try:
         task = ScanTask.objects.get(id=task_id)
         if not os.path.isdir(root):
             raise FileNotFoundError(f"Folder not found: {root}")
         root = os.path.normpath(root)
+        run = object()   # is scan ki pehchaan: purane scan ka counting thread naye scan ka data na badle
+        scan_progress.update(run=run, task_id=task_id, total=None, counted=0)
+        threading.Thread(target=_count_excel_files, args=(root, run), daemon=True).start()
         # Trailing separator zaruri: 'D:\\Data' scan karte waqt 'D:\\Data2' ki files na chhui jayein
         prefix = root if root.endswith(os.sep) else root + os.sep
         if connection.vendor == "sqlite":
-            connection.cursor().execute("PRAGMA synchronous=NORMAL")  # WAL ke saath safe aur fast
+            try:
+                connection.cursor().execute("PRAGMA synchronous=NORMAL")  # WAL ke saath safe aur fast
+            except Exception:
+                pass   # sirf speed tuning hai (transaction ke andar SQLite ye nahi badalne deta); scan nahi rukna chahiye
 
         existing = {
             p: (s, m, v)
@@ -99,6 +145,11 @@ def run_scan(task_id, root):
         last_save = time.monotonic()
         pool = _make_pool()
 
+        def fail(path, reason):
+            task.files_failed += 1
+            if len(failures) < MAX_FAILURES_STORED:
+                failures.append((path, reason))
+
         def save_result(path, name, stat, hits):
             try:
                 _store(path, name, stat, hits)
@@ -106,7 +157,7 @@ def run_scan(task_id, root):
             except ScanCancelled:
                 pass   # Stop dabaya gaya; loops cancel_event dekh kar ruk jayenge
             except Exception as exc:
-                task.files_failed += 1
+                fail(path, "Could not save to the database: " + str(exc)[:200])
                 logger.warning("DB write failed for %s: %s", path, exc)
 
         def drain(limit):
@@ -125,11 +176,11 @@ def run_scan(task_id, root):
                         hits = fut.result()
                     except BrokenProcessPool:
                         broken = True
-                        task.files_failed += 1
+                        fail(path, "Reader crashed on this file (too big or damaged)")
                         logger.warning("Worker crashed on %s (RAM kam? SCAN_WORKERS kam karo)", path)
                         continue
                     except Exception as exc:
-                        task.files_failed += 1
+                        fail(path, _friendly_reason(exc))
                         logger.warning("Failed to read %s: %s", path, exc)
                         continue
                     save_result(path, name, stat, hits)
@@ -157,7 +208,7 @@ def run_scan(task_id, root):
                 try:
                     stat = os.stat(path)
                 except OSError as exc:
-                    task.files_failed += 1
+                    fail(path, _friendly_reason(exc))
                     logger.warning("Cannot stat %s: %s", path, exc)
                     continue
 
@@ -169,7 +220,7 @@ def run_scan(task_id, root):
                         try:
                             save_result(path, fname, stat, parse_file(path, MIN_DIGITS))
                         except Exception as exc:
-                            task.files_failed += 1
+                            fail(path, _friendly_reason(exc))
                             logger.warning("Failed to read %s: %s", path, exc)
                     else:
                         try:
@@ -217,6 +268,12 @@ def run_scan(task_id, root):
                 pool.shutdown(wait=not cancelled, cancel_futures=True)   # Stop par chalte kaam ka intezaar nahi
         except Exception:
             logger.exception("Could not shut down the worker pool")
+        try:
+            if failures:   # failed files ki list save (scan khatam, cancel ya error: teeno me)
+                ScanFailure.objects.bulk_create(
+                    [ScanFailure(task_id=task_id, file_path=p[:1000], reason=r[:500]) for p, r in failures])
+        except Exception:
+            logger.exception("Could not save the failed-files list")
         try:
             connection.close()
         except Exception:

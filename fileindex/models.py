@@ -18,6 +18,7 @@ class NumberIndex(models.Model):
     """Har number ki alag row -> search indexed aur exact match hota hai."""
     file = models.ForeignKey(FileIndex, on_delete=models.CASCADE, related_name="numbers")
     number = models.CharField(max_length=32, db_index=True)
+    match_key = models.CharField(max_length=32, db_index=True, default="")   # aakhri 10 digits (country code ignore)
     sheet = models.CharField(max_length=100, blank=True)
     row = models.PositiveIntegerField()
     col = models.PositiveSmallIntegerField(default=0)  # 1 = column A
@@ -34,6 +35,19 @@ class ScanTask(models.Model):
     files_failed = models.IntegerField(default=0)
     message = models.CharField(max_length=500, blank=True)  # current file / error text
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Scan #{self.pk} ({self.status})"
+
+
+class ScanFailure(models.Model):
+    """Scan me jo file padhi nahi gayi: kaun si file aur kyun (Scan History page par dikhta hai)."""
+    task = models.ForeignKey(ScanTask, on_delete=models.CASCADE, related_name="failures")
+    file_path = models.CharField(max_length=1000)
+    reason = models.CharField(max_length=500, blank=True)
+
+    def __str__(self):
+        return self.file_path
 
 
 class BulkSearch(FileIndex):

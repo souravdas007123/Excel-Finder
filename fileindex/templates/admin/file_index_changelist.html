@@ -21,6 +21,9 @@
     .scan-head .nav-link { margin: 0; }
     .scan-meta { font-size: 13px; color: var(--body-quiet-color, #888); margin: 4px 0 14px; }
 
+    .scan-warn { margin-top: 6px; color: #b36b00; }
+    .scan-warn a { font-weight: 600; }
+
     .scan-controls { display: flex; gap: 10px; align-items: center; }
     .scan-controls .input-field { margin: 0; flex: 1; height: 42px; padding: 0 12px; }
     .scan-controls select.input-field { height: 42px; padding: 0 12px; }
@@ -60,6 +63,8 @@
         animation: slide 1.2s ease-in-out infinite;
     }
     @keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+    .progress.determinate > span { animation: none; margin-left: 0; transition: width 0.6s ease; }
+    .scan-eta { margin-top: 8px; font-size: 13px; color: var(--body-quiet-color, #777); font-variant-numeric: tabular-nums; }
     .scan-panel .chips-row { margin: 10px 0 0; gap: 8px; }
     .scan-panel .chip { padding: 3px 12px; font-size: 12px; }
     .scan-file { font-size: 12px; color: var(--body-quiet-color, #777); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -125,6 +130,12 @@
                 {% else %}
                     No files indexed yet. Choose a drive below and start your first scan.
                 {% endif %}
+                {% if last_scan_failed %}
+                    <div class="scan-warn">
+                        &#9888; {{ last_scan_failed.count }} file{{ last_scan_failed.count|pluralize }} could not be read in the last scan.
+                        <a href="{% url 'admin:fileindex_scantask_change' last_scan_failed.id %}">See which files and why</a>
+                    </div>
+                {% endif %}
             </div>
 
             <div class="scan-controls">
@@ -170,7 +181,8 @@
                         <button id="stopScanBtn" type="button" class="btn-danger btn-sm">Stop Scan</button>
                     </span>
                 </div>
-                <div class="progress"><span></span></div>
+                <div id="scanBar" class="progress"><span></span></div>
+                <div id="scanEta" class="scan-eta"></div>
                 <div id="scanCounts" class="chips-row"></div>
                 <div id="scanFile" class="scan-file"></div>
             </div>
@@ -292,6 +304,11 @@
     }
 
     function setRunning(on) {
+        if (on) {   // naye scan par bar / ETA saaf
+            $('scanBar').classList.remove('determinate');
+            $('scanBar').firstElementChild.style.width = '';
+            $('scanEta').textContent = '';
+        }
         card.classList.toggle('scanning', on);
         panel.hidden = !on;
         btnText.textContent = on ? 'Scanning...' : 'Start Scan';
@@ -427,6 +444,34 @@
             chip(`${t.files_failed} failed`, t.files_failed ? 'bad' : '')
         );
         $('scanFile').textContent = t.message ? 'Reading: ' + t.message : '';
+        renderEta(t);
+    }
+
+    function fmtEta(sec) {
+        if (sec < 45) return 'less than a minute';
+        const m = Math.round(sec / 60);
+        if (m < 60) return '~' + m + ' min';
+        const h = Math.floor(m / 60), r = m % 60;
+        return '~' + h + ' h' + (r ? ' ' + r + ' min' : '');
+    }
+    // Progress bar + "kitna baaki": kul files ki ginti background me hoti hai, tab tak bar ghoomta rehta hai
+    function renderEta(t) {
+        const bar = $('scanBar'), eta = $('scanEta');
+        const done = t.files_indexed + t.files_skipped + t.files_failed;
+        if (t.files_total == null) {
+            bar.classList.remove('determinate');
+            bar.firstElementChild.style.width = '';
+            eta.textContent = 'Counting files' + (t.files_counted ? '... ' + t.files_counted.toLocaleString() + ' Excel files found so far' : '...');
+            return;
+        }
+        const total = Math.max(t.files_total, done);   // gin-ti aur scan ke beech file badal jaye toh bar 100% se upar na jaye
+        bar.classList.add('determinate');
+        bar.firstElementChild.style.width = (total ? Math.min(100, done / total * 100) : 100).toFixed(1) + '%';
+        let text = `${done.toLocaleString()} of ${total.toLocaleString()} files`;
+        if (done >= 3 && t.elapsed >= 3 && done < total) {
+            text += ` \u00B7 ${fmtEta((total - done) / (done / t.elapsed))} left`;
+        }
+        eta.textContent = text;
     }
 
     function watch(taskId) {

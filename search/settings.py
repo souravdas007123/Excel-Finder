@@ -10,22 +10,76 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
+import secrets
+import sys
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# ---- Installed (.exe) mode ----
+# Installer wala app PyInstaller se bandhta hai (sys.frozen). Tab code Program Files me read-only hota hai, isliye
+# database, secret key aur log customer ke apne folder me jaate hain (Windows: %LOCALAPPDATA%\ExcelFinder).
+FROZEN = bool(getattr(sys, "frozen", False))
+if FROZEN:
+    DATA_DIR = Path(os.environ.get("EXCEL_FINDER_DATA") or (Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "ExcelFinder"))
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+elif os.environ.get("EXCEL_FINDER_DATA"):    # alag data folder (jaise screenshots / testing ke liye), asli database ko chhue bina
+    DATA_DIR = Path(os.environ["EXCEL_FINDER_DATA"])
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+else:
+    DATA_DIR = BASE_DIR     # apne computer par pehle jaisa: db.sqlite3 project folder me
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
+# ---- Local vs server ----
+# Apne computer par kuch set karne ki zarurat nahi (neeche ke defaults local ke liye hain).
+# Server par daalna ho toh ye environment variables set karo:
+#   DJANGO_DEBUG=0
+#   DJANGO_SECRET_KEY=<lamba random secret>
+#   DJANGO_ALLOWED_HOSTS=example.com,www.example.com
+#   DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com      (https ke peeche ho toh)
+def _env_bool(name, default):
+    value = os.environ.get(name)
+    return default if value is None else value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _env_list(name):
+    return [item.strip() for item in os.environ.get(name, '').split(',') if item.strip()]
+
+
+_INSECURE_DEV_KEY = 'django-insecure-9cfi4a=7i8xv0x)^nh8_ycjhse7hmt4n6q!n*-dugzjdfhtx3$'
+
+def _installed_secret_key():
+    """Har install ki apni random secret key (pehli baar banti hai, folder me save rehti hai)."""
+    path = DATA_DIR / 'secret.key'
+    if path.exists() and path.read_text().strip():
+        return path.read_text().strip()
+    key = secrets.token_urlsafe(64)
+    path.write_text(key)
+    return key
+
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-9cfi4a=7i8xv0x)^nh8_ycjhse7hmt4n6q!n*-dugzjdfhtx3$'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY') or (_installed_secret_key() if FROZEN else _INSECURE_DEV_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_bool('DJANGO_DEBUG', not FROZEN)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = _env_list('DJANGO_ALLOWED_HOSTS') or (['127.0.0.1', 'localhost', '[::1]'] if FROZEN else [])
+CSRF_TRUSTED_ORIGINS = _env_list('DJANGO_CSRF_TRUSTED_ORIGINS')
+
+if not DEBUG:
+    if SECRET_KEY == _INSECURE_DEV_KEY:
+        raise ImproperlyConfigured('DJANGO_DEBUG=0 ke saath DJANGO_SECRET_KEY set karna zaruri hai.')
+    # Sirf https par cookies bhejo (http par chalana ho toh DJANGO_SECURE_COOKIES=0)
+    SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = _env_bool('DJANGO_SECURE_COOKIES', not FROZEN)   # installed app http://127.0.0.1 par chalta hai
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 
 # Application definition
@@ -38,6 +92,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'fileindex',  # Hamara custom app
+    'licensing',  # License: key, expiry, block
 ]
 
 MIDDLEWARE = [
@@ -48,7 +103,12 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'search.middleware.FirstRunSetupMiddleware',   # koi user nahi (pehli baar) toh /setup/
+    'licensing.middleware.LicenseMiddleware',   # license khatam ho toh pages band (LICENSE_ENFORCED ho tabhi)
+    'search.middleware.UpdateCheckMiddleware',  # roz ek baar 'naya version?' (UPDATE_CHECK_URL ho tabhi)
 ]
+if FROZEN:   # installed app me static files (admin ka CSS/JS) WhiteNoise dega, kyunki DEBUG band hai
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
 ROOT_URLCONF = 'search.urls'
 
@@ -62,6 +122,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'search.context_processors.update_notice',
             ],
         },
     },
@@ -76,7 +137,7 @@ WSGI_APPLICATION = 'search.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DATA_DIR / 'db.sqlite3',
         'OPTIONS': {
             'timeout': 30,
             'init_command': 'PRAGMA journal_mode=WAL;',
@@ -119,6 +180,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'   # server par / installer banate waqt: python manage.py collectstatic
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -132,6 +194,9 @@ SCAN_LOCATIONS = {
 
 SCAN_MIN_DIGITS = 5
 
+# Aakhri scan itne din se purana ho toh Bulk Search page par "dobara scan karo" ki chetavni dikhti hai
+SCAN_STALE_DAYS = 7
+
 SCAN_SKIP_DIRS = (
     '$Recycle.Bin', 'System Volume Information', 'Windows', 'Program Files',
     'Program Files (x86)', 'ProgramData', 'AppData', 'node_modules', '.git',
@@ -139,3 +204,41 @@ SCAN_SKIP_DIRS = (
 )
 
 SCAN_WORKERS = 2 
+
+
+# ---- License (customer ke PC par) ----
+# Installer banate waqt `licensing/build_config.py` ban jati hai (installer/make_build_config.py): usme ENFORCED=True,
+# server ka address aur PUBLIC key hoti hai, aur wo .exe ke andar band ho jati hai. Customer use badal nahi sakta.
+# Apne computer par (build_config nahi) license check band rehta hai, jab tak environment variable na do:
+#   EXCEL_FINDER_LICENSE_ENFORCED=1  EXCEL_FINDER_LICENSE_SERVER=http://127.0.0.1:8800  EXCEL_FINDER_LICENSE_PUBLIC_KEY=...
+try:
+    from licensing import build_config as _license_build
+except ImportError:
+    _license_build = None
+
+if _license_build is not None:
+    LICENSE_ENFORCED = bool(getattr(_license_build, "ENFORCED", True))
+    LICENSE_SERVER_URL = getattr(_license_build, "SERVER_URL", "")
+    LICENSE_PUBLIC_KEY = getattr(_license_build, "PUBLIC_KEY", "")
+    LICENSE_BUY_URL = getattr(_license_build, "BUY_URL", "")
+    LICENSE_SUPPORT = getattr(_license_build, "SUPPORT", "")
+    UPDATE_CHECK_URL = getattr(_license_build, "UPDATE_URL", "")
+else:
+    LICENSE_ENFORCED = _env_bool("EXCEL_FINDER_LICENSE_ENFORCED", False)
+    LICENSE_SERVER_URL = os.environ.get("EXCEL_FINDER_LICENSE_SERVER", "")
+    LICENSE_PUBLIC_KEY = os.environ.get("EXCEL_FINDER_LICENSE_PUBLIC_KEY", "")
+    LICENSE_BUY_URL = os.environ.get("EXCEL_FINDER_LICENSE_BUY_URL", "")
+    LICENSE_SUPPORT = os.environ.get("EXCEL_FINDER_LICENSE_SUPPORT", "")
+    UPDATE_CHECK_URL = os.environ.get("EXCEL_FINDER_UPDATE_URL", "")
+LICENSE_CHECK_INTERVAL_HOURS = 24   # app online ho toh itne ghante me ek baar server se check
+LICENSE_WARN_DAYS = 14              # expiry se itne din pehle chetavni
+UPDATE_CACHE_FILE = DATA_DIR / 'update_info.json'   # 'naya version' ki jaankari (chhoti JSON file)
+
+if FROZEN:   # windowed .exe me console nahi hota: log file me jaate hain
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {'file': {'class': 'logging.handlers.RotatingFileHandler', 'filename': str(DATA_DIR / 'excel-finder.log'),
+                              'maxBytes': 1_000_000, 'backupCount': 2, 'encoding': 'utf-8'}},
+        'root': {'handlers': ['file'], 'level': 'WARNING'},
+    }

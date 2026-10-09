@@ -14,6 +14,13 @@ except ImportError:
     HAS_CALAMINE = False
 
 MAX_DIGITS = 32
+KEY_DIGITS = 10   # phone match: country code / leading 0 hata kar aakhri 10 digits compare hote hain
+
+
+def match_key(number):
+    """'919856325417', '09856325417', '9856325417' -> teeno ka key '9856325417'. 10 se chhote numbers jaise ke taise."""
+    return number[-KEY_DIGITS:] if len(number) > KEY_DIGITS else number
+
 _SEPARATORS = re.compile(r"[\s\-+()]")
 _DIGITS = re.compile(r"\d+")
 _SKIP_TYPES = (datetime, date, time, timedelta, bool)
