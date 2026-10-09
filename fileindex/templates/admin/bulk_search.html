@@ -25,6 +25,8 @@
             Step 2 &middot; Bulk Number Search
         </div>
 
+        <div class="hint" style="margin:-6px 0 14px;">Search shows <b>which files</b> contain your numbers first. Click <b>View details</b> on a file to see the sheet, row and column.</div>
+
         <label class="field-label" for="bulkNumbers">Enter Numbers (comma separated or one per line)</label>
         <textarea id="bulkNumbers" class="input-field" placeholder="Example:&#10;9856325417&#10;8569741235"></textarea>
         <div id="numCounter" class="hint">0 numbers detected · numbers shorter than {{ min_digits }} digits are ignored · Ctrl+Enter to search</div>
@@ -44,37 +46,67 @@
 
     <!-- RESULTS -->
     <div id="bulkResultContainer" class="premium-card result-container" style="display: none;">
-        <div class="card-header" style="border-bottom: none; margin-bottom: 10px;">Search Results Analysis</div>
+        <div class="card-header" style="border-bottom: none; margin-bottom: 10px;">Search Results</div>
         <div id="bulkChips" class="chips-row"></div>
         <div id="bulkNotes"></div>
 
         <div class="toolbar">
-            <div class="filter-group" id="filterGroup">
-                <button class="filter-btn active" data-filter="all">All</button>
-                <button class="filter-btn" data-filter="found">Found</button>
-                <button class="filter-btn" data-filter="missing">Not Found</button>
+            <div class="tabs" id="tabs">
+                <button class="tab-btn active" data-tab="files" type="button">By File</button>
+                <button class="tab-btn" data-tab="numbers" id="tabNumbers" type="button">By Number</button>
+                <button class="tab-btn" data-tab="missing" type="button">Not Found</button>
             </div>
             <div class="filter-group">
-                <button id="copyMissingBtn" class="tool-btn">Copy not-found numbers</button>
-                <button id="exportXlsxBtn" class="tool-btn">Export Excel report</button>
+                <button id="copyMissingBtn" class="tool-btn" type="button">Copy not-found numbers</button>
+                <button id="exportXlsxBtn" class="tool-btn" type="button">Export Excel report</button>
             </div>
         </div>
 
-        <div style="max-height: 650px; overflow-y: auto; border: 1px solid var(--border-color, #e0e0e0); border-radius: 6px;">
-            <table class="result-table" style="border: none;">
-                <thead>
-                    <tr>
-                        <th style="width: 5%;">#</th>
-                        <th style="width: 17%;">Target Number</th>
-                        <th style="width: 14%;">Status</th>
-                        <th style="width: 64%;">Where It Was Found</th>
-                    </tr>
-                </thead>
-                <tbody id="bulkResultBody"></tbody>
-            </table>
+        <!-- TAB 1: which files contain how many of the numbers -->
+        <div id="paneFiles" class="pane">
+            <div class="table-scroll">
+                <table class="result-table no-stripe" style="border: none;">
+                    <thead>
+                        <tr>
+                            <th style="width: 4%;">#</th>
+                            <th style="width: 28%;">File</th>
+                            <th style="width: 14%;">Numbers Found</th>
+                            <th style="width: 40%;">Which Numbers</th>
+                            <th style="width: 14%;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="fileBody"></tbody>
+                </table>
+            </div>
+            <div id="filesMore" class="more-wrap"><button id="filesMoreBtn" class="tool-btn" type="button"></button></div>
         </div>
-        <div id="moreWrap" style="display: none; text-align: center; margin-top: 12px;">
-            <button id="showMoreBtn" class="tool-btn" type="button"></button>
+
+        <!-- TAB 2: detailed view per number (only for lists up to the detail limit) -->
+        <div id="paneNumbers" class="pane" hidden>
+            <div class="filter-group" id="filterGroup" style="margin-bottom: 12px;">
+                <button class="filter-btn active" data-filter="all" type="button">All</button>
+                <button class="filter-btn" data-filter="found" type="button">Found</button>
+                <button class="filter-btn" data-filter="missing" type="button">Not Found</button>
+            </div>
+            <div class="table-scroll">
+                <table class="result-table" style="border: none;">
+                    <thead>
+                        <tr>
+                            <th style="width: 5%;">#</th>
+                            <th style="width: 17%;">Target Number</th>
+                            <th style="width: 14%;">Status</th>
+                            <th style="width: 64%;">Where It Was Found</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bulkResultBody"></tbody>
+                </table>
+            </div>
+            <div id="moreWrap" class="more-wrap"><button id="showMoreBtn" class="tool-btn" type="button"></button></div>
+        </div>
+
+        <!-- TAB 3: numbers that were not found -->
+        <div id="paneMissing" class="pane" hidden>
+            <div id="missingBox" class="missing-box"></div>
         </div>
     </div>
 </div>
@@ -90,7 +122,11 @@
         extract: "{% url 'extract_numbers' %}",
         exportXlsx: "{% url 'export_excel' %}",
         fileReport: "{% url 'file_report' %}",
+        fileLocations: "{% url 'file_locations' %}",
     };
+    const PAGE = 100;          // ek baar me itni rows draw hoti hain (page fast rahe)
+    const DETAIL_PAGE = 100;   // 'View details' ek baar me itne numbers ki jagah laata hai
+    const PREVIEW = 8;         // har file ke saamne itne numbers seedhe dikhte hain
 
     async function post(url, data) {
         const fd = new FormData();
@@ -108,6 +144,7 @@
         if (className) e.className = className;
         return e;
     }
+    const fmt = (n) => Number(n).toLocaleString();
 
     async function saveResponse(res, fallbackName) {
         const blob = await res.blob();
@@ -123,8 +160,10 @@
 
     const searchBtn = $('bulkSearchBtn'), searchText = $('bulkBtnText');
     const input = $('bulkNumbers');
-    const PAGE = 100;   // ek baar me itni rows render hoti hain (badi list par bhi page fast rahe)
-    let lastResults = [], currentFilter = 'all', shown = PAGE, lastInput = '';
+    const state = {
+        files: [], results: [], missing: [], input: '', detail: true,
+        filter: 'all', fileShown: PAGE, fileRendered: 0, numShown: PAGE, numRendered: 0,
+    };
 
     /* ---- live counter ---- */
     function updateCounter() {
@@ -134,7 +173,7 @@
             if (n.length >= MIN_DIGITS) seen.add(n);
         });
         $('numCounter').textContent =
-            `${seen.size} unique number${seen.size === 1 ? '' : 's'} detected · numbers shorter than ${MIN_DIGITS} digits are ignored · Ctrl+Enter to search`;
+            `${fmt(seen.size)} unique number${seen.size === 1 ? '' : 's'} detected · numbers shorter than ${MIN_DIGITS} digits are ignored · Ctrl+Enter to search`;
     }
     input.addEventListener('input', updateCounter);
     input.addEventListener('keydown', (e) => {
@@ -143,7 +182,7 @@
     $('clearBtn').addEventListener('click', () => {
         input.value = '';
         updateCounter();
-        lastResults = [];
+        state.files = []; state.results = []; state.missing = [];
         $('bulkResultContainer').style.display = 'none';
         input.focus();
     });
@@ -154,6 +193,7 @@
         uploadNote.textContent = text;
         uploadNote.className = 'upload-note' + (isError ? ' err' : '');
     }
+
     async function downloadFileReport(file) {
         const fd = new FormData();
         fd.append('file', file);
@@ -178,18 +218,18 @@
             if (!data.numbers.length) {
                 setNote('No numbers found in ' + data.file + '.', true);
             } else if (data.truncated && confirm(
-                    `This file has ${data.total} numbers, but the screen can show only ${data.max} at a time.\n\n` +
-                    `OK = download a full Excel report for ALL ${data.total} numbers (recommended)\n` +
-                    `Cancel = load only the first ${data.max} numbers on screen`)) {
-                setNote(`Building the full report for ${data.total} numbers... this can take a while for very large files.`);
+                    `This file has ${fmt(data.total)} numbers, but the screen can handle only ${fmt(data.max)} at a time.\n\n` +
+                    `OK = download a full Excel report for ALL ${fmt(data.total)} numbers (recommended)\n` +
+                    `Cancel = load only the first ${fmt(data.max)} numbers on screen`)) {
+                setNote(`Building the full report for ${fmt(data.total)} numbers... this can take a while for very large files.`);
                 await downloadFileReport(file);
-                setNote(`Full report downloaded for ${data.total} numbers from ${data.file}.`);
+                setNote(`Full report downloaded for ${fmt(data.total)} numbers from ${data.file}.`);
             } else {
                 const existing = input.value.trim();
                 input.value = (existing ? existing + '\n' : '') + data.numbers.join('\n');
                 updateCounter();
-                setNote(`${data.numbers.length} numbers loaded from ${data.file}` +
-                        (data.truncated ? ` (file has ${data.total}, only first ${data.max} loaded)` : '') +
+                setNote(`${fmt(data.numbers.length)} numbers loaded from ${data.file}` +
+                        (data.truncated ? ` (file has ${fmt(data.total)}, only first ${fmt(data.max)} loaded)` : '') +
                         '. Now press Search.');
             }
         } catch (e) {
@@ -200,7 +240,7 @@
         }
     });
 
-    /* ---- row detail ---- */
+    /* ---- row detail ("View full row") ---- */
     function buildDetailTable(cells) {
         const table = document.createElement('table');
         cells.forEach((c) => {
@@ -235,18 +275,20 @@
                 loaded = true;
                 btn.textContent = 'Hide row';
             } catch (e) {
-                box.textContent = '⚠ ' + e.message;
+                box.textContent = '\u26A0 ' + e.message;
             }
         });
     }
 
-    function buildMatch(m) {
+    // Ek jagah (sheet / row / column). withFile=true ho toh file ka naam aur folder bhi dikhta hai.
+    function buildLocation(m, withFile) {
         const item = el('div', undefined, 'match-item');
-        item.appendChild(el('div', m.file, 'match-file'));
-        const folder = el('div', m.folder, 'match-folder');
-        folder.title = m.folder;
-        item.appendChild(folder);
-
+        if (withFile) {
+            item.appendChild(el('div', m.file, 'match-file'));
+            const folder = el('div', m.folder, 'match-folder');
+            folder.title = m.folder;
+            item.appendChild(folder);
+        }
         const tags = el('div');
         tags.appendChild(el('span', 'Sheet: ' + (m.sheet || '-'), 'tag'));
         tags.appendChild(el('span', 'Row: ' + m.row, 'tag'));
@@ -264,17 +306,134 @@
         return item;
     }
 
-    /* ---- results ---- */
-    function visibleRows() {
-        return lastResults
-            .map((item, idx) => ({ item, idx }))
-            .filter(({ item }) => currentFilter === 'all' || (currentFilter === 'found') === item.found);
+    /* ---- TAB 1: By File ---- */
+    function attachFileDetails(btn, detailTr, box, f) {
+        const table = document.createElement('table');
+        const foot = el('div', undefined, 'foot-note');
+        box.appendChild(table);
+        box.appendChild(foot);
+        let loadedUpTo = 0, opened = false;
+
+        function renderFoot() {
+            foot.replaceChildren();
+            if (loadedUpTo < f.numbers.length) {
+                const next = Math.min(DETAIL_PAGE, f.numbers.length - loadedUpTo);
+                const more = el('button', `Load next ${next} numbers`, 'tool-btn');
+                more.type = 'button';
+                more.addEventListener('click', loadMore);
+                foot.appendChild(more);
+            } else if (f.numbers_count > f.numbers.length) {
+                foot.textContent = `Showing the first ${fmt(f.numbers.length)} of ${fmt(f.numbers_count)} numbers. ` +
+                                   'Use "Export Excel report" for the complete list.';
+            }
+        }
+
+        async function loadMore() {
+            const nums = f.numbers.slice(loadedUpTo, loadedUpTo + DETAIL_PAGE);
+            foot.textContent = 'Loading...';
+            try {
+                const data = await post(urls.fileLocations, { file_id: f.file_id, numbers: nums.join('\n') });
+                data.items.forEach((item) => {
+                    const tr = table.insertRow();
+                    tr.insertCell().appendChild(el('b', item.number));
+                    const td = tr.insertCell();
+                    item.locations.forEach((loc) => td.appendChild(buildLocation(
+                        { file_id: f.file_id, sheet: loc.sheet, row: loc.row, col: loc.col, column: loc.column }, false)));
+                });
+                loadedUpTo += nums.length;
+                renderFoot();
+            } catch (e) {
+                foot.textContent = '\u26A0 ' + e.message;
+            }
+        }
+
+        btn.addEventListener('click', () => {
+            if (!opened) {
+                opened = true;
+                detailTr.hidden = false;
+                btn.textContent = 'Hide details';
+                loadMore();
+                return;
+            }
+            detailTr.hidden = !detailTr.hidden;
+            btn.textContent = detailTr.hidden ? 'View details' : 'Hide details';
+        });
     }
 
-    function render() {
+    function renderFiles(reset) {
+        const body = $('fileBody');
+        if (reset) { body.replaceChildren(); state.fileRendered = 0; }
+
         const frag = document.createDocumentFragment();
+        if (!state.files.length && reset) {
+            const tr = document.createElement('tr');
+            const td = tr.insertCell();
+            td.colSpan = 5;
+            td.className = 'empty-note';
+            td.textContent = 'None of these numbers were found in the indexed files.';
+            frag.appendChild(tr);
+        }
+
+        state.files.slice(state.fileRendered, state.fileShown).forEach((f, k) => {
+            const tr = document.createElement('tr');
+            tr.insertCell().textContent = state.fileRendered + k + 1;
+
+            const fileCell = tr.insertCell();
+            fileCell.appendChild(el('div', f.file, 'match-file'));
+            const folder = el('div', f.folder, 'match-folder');
+            folder.title = f.folder;
+            fileCell.appendChild(folder);
+            if (f.modified) fileCell.appendChild(el('span', 'Modified: ' + f.modified, 'tag muted'));
+
+            const countCell = tr.insertCell();
+            countCell.appendChild(el('div', fmt(f.numbers_count), 'big-num'));
+            countCell.appendChild(el('div',
+                `number${f.numbers_count === 1 ? '' : 's'} · ${fmt(f.matches)} match${f.matches === 1 ? '' : 'es'}`, 'count-line'));
+
+            const numCell = tr.insertCell();
+            f.numbers.slice(0, PREVIEW).forEach((n) => numCell.appendChild(el('span', n, 'num-chip')));
+            const rest = f.numbers_count - Math.min(PREVIEW, f.numbers.length);
+            if (rest > 0) numCell.appendChild(el('span', `+ ${fmt(rest)} more`, 'num-chip more'));
+
+            const btn = el('button', 'View details', 'tool-btn');
+            btn.type = 'button';
+            tr.insertCell().appendChild(btn);
+
+            const detailTr = document.createElement('tr');
+            detailTr.className = 'detail-row';
+            detailTr.hidden = true;
+            const detailTd = detailTr.insertCell();
+            detailTd.colSpan = 5;
+            const box = el('div', undefined, 'detail-box');
+            detailTd.appendChild(box);
+            attachFileDetails(btn, detailTr, box, f);
+
+            frag.appendChild(tr);
+            frag.appendChild(detailTr);
+        });
+        body.appendChild(frag);
+        state.fileRendered = Math.min(state.fileShown, state.files.length);
+
+        const remaining = state.files.length - state.fileRendered;
+        $('filesMore').style.display = remaining > 0 ? 'block' : 'none';
+        $('filesMoreBtn').textContent = `Show ${Math.min(PAGE, remaining)} more files (${fmt(remaining)} remaining)`;
+    }
+    $('filesMoreBtn').addEventListener('click', () => { state.fileShown += PAGE; renderFiles(false); });
+
+    /* ---- TAB 2: By Number (detailed) ---- */
+    function visibleRows() {
+        return state.results
+            .map((item, idx) => ({ item, idx }))
+            .filter(({ item }) => state.filter === 'all' || (state.filter === 'found') === item.found);
+    }
+
+    function renderNumbers(reset) {
+        const body = $('bulkResultBody');
+        if (reset) { body.replaceChildren(); state.numRendered = 0; }
         const rows = visibleRows();
-        rows.slice(0, shown).forEach(({ item, idx }) => {
+
+        const frag = document.createDocumentFragment();
+        rows.slice(state.numRendered, state.numShown).forEach(({ item, idx }) => {
             const tr = document.createElement('tr');
             tr.insertCell().textContent = idx + 1;
             tr.insertCell().appendChild(el('b', item.number));
@@ -288,7 +447,7 @@
 
             const where = tr.insertCell();
             if (item.found) {
-                item.matches.forEach((m) => where.appendChild(buildMatch(m)));
+                item.matches.forEach((m) => where.appendChild(buildLocation(m, true)));
                 if (item.total > item.matches.length) {
                     where.appendChild(el('div', `+ ${item.total - item.matches.length} more matches not shown`, 'count-line'));
                 }
@@ -300,61 +459,93 @@
             }
             frag.appendChild(tr);
         });
-        $('bulkResultBody').replaceChildren(frag);
-        const remaining = rows.length - shown;
+        body.appendChild(frag);
+        state.numRendered = Math.min(state.numShown, rows.length);
+
+        const remaining = rows.length - state.numRendered;
         $('moreWrap').style.display = remaining > 0 ? 'block' : 'none';
-        $('showMoreBtn').textContent = `Show ${Math.min(PAGE, remaining)} more (${remaining} remaining)`;
+        $('showMoreBtn').textContent = `Show ${Math.min(PAGE, remaining)} more (${fmt(remaining)} remaining)`;
     }
-
-    $('showMoreBtn').addEventListener('click', () => { shown += PAGE; render(); });
-
-    function renderSummary(s) {
-        const chips = $('bulkChips');
-        chips.replaceChildren(
-            el('span', `Searched: ${s.searched}`, 'chip'),
-            el('span', `Found: ${s.found}`, 'chip ok'),
-            el('span', `Not found: ${s.not_found}`, 'chip bad')
-        );
-        if (s.duplicates) chips.appendChild(el('span', `Duplicates removed: ${s.duplicates}`, 'chip'));
-
-        const notes = $('bulkNotes');
-        notes.replaceChildren();
-        if (s.skipped.length) {
-            notes.appendChild(el('div', `Ignored (fewer than ${s.min_digits} digits): ${s.skipped.join(', ')}`, 'note'));
-        }
-        if (s.truncated) {
-            notes.appendChild(el('div', `Only the first ${s.max_numbers} numbers were searched.`, 'note'));
-        }
-    }
+    $('showMoreBtn').addEventListener('click', () => { state.numShown += PAGE; renderNumbers(false); });
 
     $('filterGroup').addEventListener('click', (e) => {
         const btn = e.target.closest('.filter-btn');
         if (!btn) return;
-        currentFilter = btn.dataset.filter;
-        shown = PAGE;
+        state.filter = btn.dataset.filter;
+        state.numShown = PAGE;
         document.querySelectorAll('.filter-btn').forEach((b) => b.classList.toggle('active', b === btn));
-        render();
+        renderNumbers(true);
     });
 
+    /* ---- TAB 3: Not Found ---- */
+    function renderMissing() {
+        const box = $('missingBox');
+        if (!state.missing.length) { box.textContent = 'Every number was found.'; return; }
+        const LIMIT = 2000;
+        const shown = state.missing.slice(0, LIMIT);
+        box.textContent = shown.join('\n') + (state.missing.length > LIMIT
+            ? `\n\n... and ${fmt(state.missing.length - LIMIT)} more. Use "Copy not-found numbers" or the Excel report for all of them.` : '');
+    }
+
+    /* ---- tabs, summary, tools ---- */
+    function setTab(name) {
+        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+        $('paneFiles').hidden = name !== 'files';
+        $('paneNumbers').hidden = name !== 'numbers';
+        $('paneMissing').hidden = name !== 'missing';
+    }
+    $('tabs').addEventListener('click', (e) => {
+        const btn = e.target.closest('.tab-btn');
+        if (btn && !btn.hidden) setTab(btn.dataset.tab);
+    });
+
+    function renderSummary(s) {
+        const chips = $('bulkChips');
+        chips.replaceChildren(
+            el('span', `Searched: ${fmt(s.searched)}`, 'chip'),
+            el('span', `Found: ${fmt(s.found)}`, 'chip ok'),
+            el('span', `Not found: ${fmt(s.not_found)}`, 'chip bad'),
+            el('span', `Files with matches: ${fmt(s.files)}`, 'chip')
+        );
+        if (s.duplicates) chips.appendChild(el('span', `Duplicates removed: ${fmt(s.duplicates)}`, 'chip'));
+
+        const notes = $('bulkNotes');
+        notes.replaceChildren();
+        if (s.skipped.length) {
+            notes.appendChild(el('div', `Ignored (fewer than ${s.min_digits} digits): ${s.skipped.slice(0, 20).join(', ')}` +
+                (s.skipped.length > 20 ? ` ... and ${s.skipped.length - 20} more` : ''), 'note'));
+        }
+        if (s.truncated) {
+            notes.appendChild(el('div', `Only the first ${fmt(s.max_numbers)} numbers were searched.`, 'note'));
+        }
+        if (!s.detail) {
+            notes.appendChild(el('div',
+                `The per-number view is available for up to ${fmt(s.detail_limit)} numbers. For this search use By File, ` +
+                'or Export Excel report for the complete list.', 'note'));
+        }
+        if (s.files > state.files.length) {
+            notes.appendChild(el('div', `Showing the top ${fmt(state.files.length)} of ${fmt(s.files)} files (most numbers first).`, 'note'));
+        }
+    }
+
     $('copyMissingBtn').addEventListener('click', async () => {
-        const missing = lastResults.filter((r) => !r.found).map((r) => r.number);
-        if (!missing.length) { alert('No missing numbers. Everything was found.'); return; }
+        if (!state.missing.length) { alert('No missing numbers. Everything was found.'); return; }
         try {
-            await navigator.clipboard.writeText(missing.join('\n'));
-            alert(missing.length + ' not-found numbers copied.');
+            await navigator.clipboard.writeText(state.missing.join('\n'));
+            alert(fmt(state.missing.length) + ' not-found numbers copied.');
         } catch (e) {
             alert('Copy failed. Browser blocked clipboard access.');
         }
     });
 
     $('exportXlsxBtn').addEventListener('click', async () => {
-        if (!lastResults.length) return;
+        if (!state.input) return;
         const btn = $('exportXlsxBtn');
         btn.disabled = true;
         btn.textContent = 'Preparing report...';
         try {
             const fd = new FormData();
-            fd.append('numbers', lastInput);
+            fd.append('numbers', state.input);
             fd.append('csrfmiddlewaretoken', csrf);
             const res = await fetch(urls.exportXlsx, { method: 'POST', body: fd });
             if (!res.ok) {
@@ -370,6 +561,7 @@
         }
     });
 
+    /* ---- search ---- */
     searchBtn.addEventListener('click', async () => {
         const numbers = input.value;
         if (!numbers.trim()) { alert('Please enter some numbers to search!'); return; }
@@ -378,13 +570,22 @@
         searchText.textContent = 'Searching database...';
         try {
             const data = await post(urls.search, { numbers });
-            lastResults = data.results;
-            lastInput = numbers;
-            shown = PAGE;
-            currentFilter = 'all';
+            state.files = data.files;
+            state.results = data.results;
+            state.missing = data.not_found;
+            state.input = numbers;
+            state.detail = data.summary.detail;
+            state.filter = 'all';
+            state.fileShown = PAGE;
+            state.numShown = PAGE;
             document.querySelectorAll('.filter-btn').forEach((b) => b.classList.toggle('active', b.dataset.filter === 'all'));
+
             renderSummary(data.summary);
-            render();
+            $('tabNumbers').hidden = !state.detail;
+            renderFiles(true);
+            renderNumbers(true);
+            renderMissing();
+            setTab('files');
             $('bulkResultContainer').style.display = 'flex';
         } catch (e) {
             alert('An error occurred while searching: ' + e.message);
