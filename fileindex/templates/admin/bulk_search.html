@@ -25,7 +25,16 @@
             Step 2 &middot; Bulk Number Search
         </div>
 
-        <div class="hint" style="margin:-6px 0 14px;">Search shows <b>which files</b> contain your numbers first. Click <b>View details</b> on a file to see the sheet, row and column.</div>
+        <div class="hint" style="margin:-6px 0 6px;">Search shows <b>which files</b> contain your numbers first. Click <b>View details</b> on a file to see the sheet, row and column.</div>
+        {% if has_index %}
+        <div class="index-info{% if index_is_stale %} stale{% endif %}">
+            Searching <b>{{ index_files|floatformat:"0g" }}</b> indexed file{{ index_files|pluralize }}{% if last_scan %} &middot; last scan {{ last_scan|date:"d M Y, H:i" }} ({{ last_scan|timesince }} ago){% endif %}.
+            {% if index_is_stale %}
+                <b>This index is {{ stale_days }}+ days old.</b> Files may have changed since then &mdash;
+                <a href="{% url 'admin:fileindex_fileindex_changelist' %}">scan again</a> for fresh results.
+            {% endif %}
+        </div>
+        {% endif %}
 
         <label class="field-label" for="bulkNumbers">Enter Numbers (comma separated or one per line)</label>
         <textarea id="bulkNumbers" class="input-field" placeholder="Example:&#10;9856325417&#10;8569741235"></textarea>

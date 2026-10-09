@@ -1,9 +1,11 @@
 import re
 
+from django.conf import settings
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied
 from django.utils.html import format_html, format_html_join
 from django.template.response import TemplateResponse
+from django.utils import timezone
 
 from .drives import get_scan_locations
 from .excel_parser import match_key
@@ -57,6 +59,19 @@ class FileIndexAdmin(admin.ModelAdmin):
         return super().changelist_view(request, extra_context=extra_context)
 
 
+def _index_freshness():
+    """Search page ke liye: index me kitni files hain, aakhri scan kab hua, aur kya wo purana ho gaya (SCAN_STALE_DAYS)."""
+    last = (ScanTask.objects.filter(status="Completed").order_by("-id")
+            .values_list("created_at", flat=True).first())
+    stale_days = getattr(settings, "SCAN_STALE_DAYS", 7)
+    return {
+        "index_files": FileIndex.objects.count(),
+        "last_scan": last,
+        "stale_days": stale_days,
+        "index_is_stale": bool(last and (timezone.now() - last).days >= stale_days),
+    }
+
+
 @admin.register(BulkSearch)
 class BulkSearchAdmin(admin.ModelAdmin):
     """Sidebar wala 'Bulk Number Search' page. Koi DB query nahi chalti, sirf template render hota hai."""
@@ -81,6 +96,7 @@ class BulkSearchAdmin(admin.ModelAdmin):
             "max_numbers": MAX_NUMBERS,
             "has_index": FileIndex.objects.exists(),   # kuch scan hua hai ya nahi
         }
+        context.update(_index_freshness())
         return TemplateResponse(request, "admin/bulk_search.html", context)
 
 

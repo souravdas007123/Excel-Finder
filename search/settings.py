@@ -162,6 +162,9 @@ SCAN_LOCATIONS = {
 
 SCAN_MIN_DIGITS = 5
 
+# Aakhri scan itne din se purana ho toh Bulk Search page par "dobara scan karo" ki chetavni dikhti hai
+SCAN_STALE_DAYS = 7
+
 SCAN_SKIP_DIRS = (
     '$Recycle.Bin', 'System Volume Information', 'Windows', 'Program Files',
     'Program Files (x86)', 'ProgramData', 'AppData', 'node_modules', '.git',
