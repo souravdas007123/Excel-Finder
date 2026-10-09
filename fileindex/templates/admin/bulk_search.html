@@ -40,7 +40,11 @@
         </div>
 
         <div class="action-row inline">
-            <button id="bulkSearchBtn" class="btn-primary"><span id="bulkBtnText">Search Database</span></button>
+            <button id="bulkSearchBtn" class="btn-primary btn-search" type="button">
+                <svg class="search-ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <span class="spinner" aria-hidden="true"></span>
+                <span id="bulkBtnText">Search Database</span>
+            </button>
             <button id="clearBtn" class="btn-secondary" type="button">Clear</button>
         </div>
     </div>
@@ -673,7 +677,8 @@
         if (!numbers.trim()) { alert('Please enter some numbers to search!'); return; }
 
         searchBtn.disabled = true;
-        searchText.textContent = 'Searching database...';
+        searchBtn.classList.add('busy');
+        searchText.textContent = 'Searching...';
         try {
             const data = await post(urls.search, { numbers });
             state.allFiles = data.files;
@@ -705,6 +710,7 @@
             }
         } finally {
             searchBtn.disabled = false;
+            searchBtn.classList.remove('busy');
             searchText.textContent = 'Search Database';
         }
     }

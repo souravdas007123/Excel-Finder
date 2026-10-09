@@ -220,4 +220,20 @@
     .missing-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
     .missing-actions .hint { margin: 0 0 0 4px; }
     .tool-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    /* ===== Search Database button ===== */
+    .action-row.inline { align-items: center; gap: 12px; }
+    .action-row.inline .btn-search { flex: 0 0 auto; width: auto; min-width: 210px; height: 44px; padding: 0 28px; font-size: 15px; letter-spacing: 0.2px; box-shadow: 0 2px 6px rgba(65, 118, 144, 0.35); }
+    .action-row.inline .btn-secondary { height: 44px; padding: 0 22px; }
+    .btn-search:hover:not(:disabled) { box-shadow: 0 4px 10px rgba(65, 118, 144, 0.45); }
+    .btn-search:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 1px 3px rgba(65, 118, 144, 0.4); }
+    .btn-search:focus-visible { outline: 3px solid rgba(65, 118, 144, 0.45); outline-offset: 2px; }
+    .btn-search:disabled { box-shadow: none; }
+    .btn-search .spinner { display: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; animation: btn-spin 0.7s linear infinite; }
+    .btn-search.busy .spinner { display: inline-block; }
+    .btn-search.busy .search-ico { display: none; }
+    @keyframes btn-spin { to { transform: rotate(360deg); } }
+    @media (max-width: 520px) {
+        .action-row.inline { flex-wrap: wrap; }
+        .action-row.inline .btn-search { flex: 1 1 100%; }
+    }
 </style>
