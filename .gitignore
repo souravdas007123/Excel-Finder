@@ -1,3 +1,11 @@
 db.sqlite3
 *.pyc
 __pycache__/
+# License: ye kabhi git me nahi jane chahiye
+license_server.sqlite3
+license_server/private_key.txt
+license_server_static/
+licensing/build_config.py
+build/
+dist/
+*.spec.bak
