@@ -92,7 +92,9 @@ def _collect(rows, min_digits):
                     for n in extract_numbers(str(v), min_digits):
                         hits.add((n, sheet, row_no, col_no))
             # date/bool/None/baaki types skip
-    return list(hits)
+    # Sorted: DB me number ke index me ek order me insert hota hai, set ke random order se kaafi tez (badi file ~30%).
+    # Ye kaam worker process me hota hai, isliye main process (DB likhne wala) par bojh nahi badhta.
+    return sorted(hits)
 
 
 def parse_file(path, min_digits):
