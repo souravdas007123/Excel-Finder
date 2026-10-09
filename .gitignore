@@ -9,3 +9,8 @@ licensing/build_config.py
 build/
 dist/
 *.spec.bak
+staticfiles/
+port.txt
+secret.key
+excel-finder.log*
+launcher.log

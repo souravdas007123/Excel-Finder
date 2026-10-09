@@ -95,6 +95,13 @@ def generate_keypair():
     return _b64e(raw_private), _b64e(raw_public)
 
 
+def public_from_private(private_b64):
+    """Private key se uski public key (installer banate waqt app me daalne ke liye)."""
+    raw = Ed25519PrivateKey.from_private_bytes(_b64d(private_b64)).public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return _b64e(raw)
+
+
 def sign_token(payload, private_b64):
     body = _b64e(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
     signature = Ed25519PrivateKey.from_private_bytes(_b64d(private_b64)).sign(body.encode())

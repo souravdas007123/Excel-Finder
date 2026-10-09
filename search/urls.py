@@ -1,8 +1,12 @@
 from django.contrib import admin
 from django.urls import path,include
+from django.views.generic import RedirectView
 from fileindex import views 
+from . import setup_views
 
 urlpatterns = [
+    path('', RedirectView.as_view(url='/admin/')),
+    path('setup/', setup_views.setup, name='setup'),
     path('admin/start-scan-api/', views.start_scan_api, name='start_scan'),
     path('admin/check-task/<int:task_id>/', views.check_scan_status, name='check_scan'),
     

@@ -11,12 +11,24 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+import secrets
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# ---- Installed (.exe) mode ----
+# Installer wala app PyInstaller se bandhta hai (sys.frozen). Tab code Program Files me read-only hota hai, isliye
+# database, secret key aur log customer ke apne folder me jaate hain (Windows: %LOCALAPPDATA%\ExcelFinder).
+FROZEN = bool(getattr(sys, "frozen", False))
+if FROZEN:
+    DATA_DIR = Path(os.environ.get("EXCEL_FINDER_DATA") or (Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "ExcelFinder"))
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+else:
+    DATA_DIR = BASE_DIR     # apne computer par pehle jaisa: db.sqlite3 project folder me
 
 
 # Quick-start development settings - unsuitable for production
@@ -40,20 +52,30 @@ def _env_list(name):
 
 _INSECURE_DEV_KEY = 'django-insecure-9cfi4a=7i8xv0x)^nh8_ycjhse7hmt4n6q!n*-dugzjdfhtx3$'
 
+def _installed_secret_key():
+    """Har install ki apni random secret key (pehli baar banti hai, folder me save rehti hai)."""
+    path = DATA_DIR / 'secret.key'
+    if path.exists() and path.read_text().strip():
+        return path.read_text().strip()
+    key = secrets.token_urlsafe(64)
+    path.write_text(key)
+    return key
+
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', _INSECURE_DEV_KEY)
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY') or (_installed_secret_key() if FROZEN else _INSECURE_DEV_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = _env_bool('DJANGO_DEBUG', True)
+DEBUG = _env_bool('DJANGO_DEBUG', not FROZEN)
 
-ALLOWED_HOSTS = _env_list('DJANGO_ALLOWED_HOSTS')
+ALLOWED_HOSTS = _env_list('DJANGO_ALLOWED_HOSTS') or (['127.0.0.1', 'localhost', '[::1]'] if FROZEN else [])
 CSRF_TRUSTED_ORIGINS = _env_list('DJANGO_CSRF_TRUSTED_ORIGINS')
 
 if not DEBUG:
     if SECRET_KEY == _INSECURE_DEV_KEY:
         raise ImproperlyConfigured('DJANGO_DEBUG=0 ke saath DJANGO_SECRET_KEY set karna zaruri hai.')
     # Sirf https par cookies bhejo (http par chalana ho toh DJANGO_SECURE_COOKIES=0)
-    SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = _env_bool('DJANGO_SECURE_COOKIES', True)
+    SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = _env_bool('DJANGO_SECURE_COOKIES', not FROZEN)   # installed app http://127.0.0.1 par chalta hai
     SECURE_CONTENT_TYPE_NOSNIFF = True
 
 
@@ -78,8 +100,11 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'search.middleware.FirstRunSetupMiddleware',   # koi user nahi (pehli baar) toh /setup/
     'licensing.middleware.LicenseMiddleware',   # license khatam ho toh pages band (LICENSE_ENFORCED ho tabhi)
 ]
+if FROZEN:   # installed app me static files (admin ka CSS/JS) WhiteNoise dega, kyunki DEBUG band hai
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
 ROOT_URLCONF = 'search.urls'
 
@@ -107,7 +132,7 @@ WSGI_APPLICATION = 'search.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DATA_DIR / 'db.sqlite3',
         'OPTIONS': {
             'timeout': 30,
             'init_command': 'PRAGMA journal_mode=WAL;',
@@ -150,7 +175,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'   # server par: python manage.py collectstatic
+STATIC_ROOT = BASE_DIR / 'staticfiles'   # server par / installer banate waqt: python manage.py collectstatic
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -200,3 +225,12 @@ else:
     LICENSE_SUPPORT = os.environ.get("EXCEL_FINDER_LICENSE_SUPPORT", "")
 LICENSE_CHECK_INTERVAL_HOURS = 24   # app online ho toh itne ghante me ek baar server se check
 LICENSE_WARN_DAYS = 14              # expiry se itne din pehle chetavni
+
+if FROZEN:   # windowed .exe me console nahi hota: log file me jaate hain
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {'file': {'class': 'logging.handlers.RotatingFileHandler', 'filename': str(DATA_DIR / 'excel-finder.log'),
+                              'maxBytes': 1_000_000, 'backupCount': 2, 'encoding': 'utf-8'}},
+        'root': {'handlers': ['file'], 'level': 'WARNING'},
+    }
