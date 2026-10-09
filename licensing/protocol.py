@@ -147,15 +147,26 @@ class LicenseStatus:
 
 
 def _fmt_date(dt):
-    return dt.strftime("%d %b %Y")
+    return dt.astimezone().strftime("%d %b %Y")      # is PC ki local tareekh me (UTC me nahi)
 
 
-def evaluate(token, public_b64, machine_id, now=None, max_seen=None, revoked=False, revoked_message="",
+BLOCK_DEFAULTS = {
+    "revoked": "This license has been disabled. Please contact support.",
+    "expired": "Your license has expired. Please renew to continue.",
+    "not_activated": "This PC is no longer activated for the license. Please activate again.",
+}
+
+
+def evaluate(token, public_b64, machine_id, now=None, max_seen=None, blocked_code="", blocked_message="",
              warn_days=14):
-    """Token dekhkar batao ki abhi app chalna chahiye ya nahi. Network ki zarurat nahi."""
+    """Token dekhkar batao ki abhi app chalna chahiye ya nahi. Network ki zarurat nahi.
+
+    blocked_code: server ne pichle check me jo roka (revoked / expired / not_activated), taaki wo turant lagu ho.
+    """
     now = now or utcnow()
-    if revoked:
-        return LicenseStatus("revoked", False, revoked_message or "This license has been disabled. Please contact support.")
+    if blocked_code:
+        return LicenseStatus(blocked_code, False, blocked_message or BLOCK_DEFAULTS.get(blocked_code, "License is blocked."),
+                             needs_online=blocked_code == "not_activated")
     if not token:
         return LicenseStatus("unlicensed", False, "No license activated yet. Enter your license key or start the free trial.")
     try:

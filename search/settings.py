@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'fileindex',  # Hamara custom app
+    'licensing',  # License: key, expiry, block
 ]
 
 MIDDLEWARE = [
@@ -77,6 +78,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'licensing.middleware.LicenseMiddleware',   # license khatam ho toh pages band (LICENSE_ENFORCED ho tabhi)
 ]
 
 ROOT_URLCONF = 'search.urls'
@@ -172,3 +174,29 @@ SCAN_SKIP_DIRS = (
 )
 
 SCAN_WORKERS = 2 
+
+
+# ---- License (customer ke PC par) ----
+# Installer banate waqt `licensing/build_config.py` ban jati hai (installer/make_build_config.py): usme ENFORCED=True,
+# server ka address aur PUBLIC key hoti hai, aur wo .exe ke andar band ho jati hai. Customer use badal nahi sakta.
+# Apne computer par (build_config nahi) license check band rehta hai, jab tak environment variable na do:
+#   EXCEL_FINDER_LICENSE_ENFORCED=1  EXCEL_FINDER_LICENSE_SERVER=http://127.0.0.1:8800  EXCEL_FINDER_LICENSE_PUBLIC_KEY=...
+try:
+    from licensing import build_config as _license_build
+except ImportError:
+    _license_build = None
+
+if _license_build is not None:
+    LICENSE_ENFORCED = bool(getattr(_license_build, "ENFORCED", True))
+    LICENSE_SERVER_URL = getattr(_license_build, "SERVER_URL", "")
+    LICENSE_PUBLIC_KEY = getattr(_license_build, "PUBLIC_KEY", "")
+    LICENSE_BUY_URL = getattr(_license_build, "BUY_URL", "")
+    LICENSE_SUPPORT = getattr(_license_build, "SUPPORT", "")
+else:
+    LICENSE_ENFORCED = _env_bool("EXCEL_FINDER_LICENSE_ENFORCED", False)
+    LICENSE_SERVER_URL = os.environ.get("EXCEL_FINDER_LICENSE_SERVER", "")
+    LICENSE_PUBLIC_KEY = os.environ.get("EXCEL_FINDER_LICENSE_PUBLIC_KEY", "")
+    LICENSE_BUY_URL = os.environ.get("EXCEL_FINDER_LICENSE_BUY_URL", "")
+    LICENSE_SUPPORT = os.environ.get("EXCEL_FINDER_LICENSE_SUPPORT", "")
+LICENSE_CHECK_INTERVAL_HOURS = 24   # app online ho toh itne ghante me ek baar server se check
+LICENSE_WARN_DAYS = 14              # expiry se itne din pehle chetavni

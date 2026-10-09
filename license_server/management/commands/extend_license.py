@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
 
 from license_server import core
 
@@ -18,5 +19,5 @@ class Command(BaseCommand):
         if lic.license_type == "lifetime":
             raise CommandError("Lifetime license ko badhane ki zarurat nahi.")
         core.extend(lic, o["days"])
-        self.stdout.write(self.style.SUCCESS(f"{lic.customer_name}: now valid until {lic.expires_at:%d %b %Y}"
+        self.stdout.write(self.style.SUCCESS(f"{lic.customer_name}: now valid until {timezone.localtime(lic.expires_at):%d %b %Y}"
                                              if lic.expires_at else f"{lic.customer_name}: +{o['days']} days will apply on first activation"))

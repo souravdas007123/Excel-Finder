@@ -14,6 +14,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl.utils import get_column_letter
 
+from licensing.service import record_usage
+
 from .drives import get_scan_locations
 from .excel_parser import extract_numbers, match_key, parse_file
 from .models import FileIndex, NumberIndex, ScanTask
@@ -70,6 +72,7 @@ def start_scan_api(request):
         ScanTask.objects.filter(status="Running").update(status="Error", message="Interrupted")
         task = ScanTask.objects.create(status="Running")
         threading.Thread(target=run_scan, args=(task.id, root), daemon=True).start()
+        record_usage("scan")
     except Exception:
         scan_lock.release()
         raise
@@ -274,6 +277,7 @@ def bulk_search_api(request):
                 })
 
     by_file = sorted(file_stats.values(), key=lambda f: (-f["numbers_count"], f["file"].lower()))
+    record_usage("search")
     return JsonResponse({
         "status": "success",
         "summary": {

@@ -39,7 +39,7 @@ def _ensure_usable(lic, now):
         raise LicenseError("revoked", lic.revoked_reason or "This license has been disabled. Please contact support.")
     if lic.expires_at and now > lic.expires_at:
         what = "free trial has ended" if lic.license_type == "trial" else "license has expired"
-        raise LicenseError("expired", f"Your {what} on {lic.expires_at:%d %b %Y}. Please renew to continue.")
+        raise LicenseError("expired", f"Your {what} on {timezone.localtime(lic.expires_at):%d %b %Y}. Please renew to continue.")
 
 
 def _issue(lic, machine_id, now):
