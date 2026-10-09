@@ -457,8 +457,9 @@ def file_report_api(request):
     numbers = numbers[:MAX_FILE_NUMBERS]
     max_hits = EXPORT_MAX_HITS if len(numbers) <= DETAIL_LIMIT else EXPORT_MAX_HITS_HUGE
     file_stats = {}
-    data = build_report(_lookup_chunks(numbers, max_hits, file_stats, _want_last10(request)), len(numbers), [],
-                        duplicates, max_hits, file_stats)
+    last10 = _want_last10(request)
+    data = build_report(_lookup_chunks(numbers, max_hits, file_stats, last10), len(numbers), [],
+                        duplicates, max_hits, file_stats, last10)
     return _xlsx_response(data)
 
 
@@ -472,7 +473,7 @@ def export_excel_api(request):
     max_hits = EXPORT_MAX_HITS if len(numbers) <= DETAIL_LIMIT else EXPORT_MAX_HITS_HUGE
     file_stats = {}
     data = build_report(_lookup_chunks(numbers, max_hits, file_stats, last10), len(numbers), skipped, duplicates,
-                        max_hits, file_stats)
+                        max_hits, file_stats, last10)
     return _xlsx_response(data)
 
 
