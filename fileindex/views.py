@@ -21,7 +21,7 @@ from .models import FileIndex, NumberIndex, ScanTask
 from .report import build_report
 from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, cancel_event, read_row, run_scan, scan_lock
 
-MAX_NUMBERS = 100_000       # ek baar me screen par max numbers (file-wise summary chhoti rehti hai)
+MAX_NUMBERS = 2000          # ek baar me max numbers (isse zyada ho toh full Excel report milti hai)
 DETAIL_LIMIT = 2000         # isse zyada numbers par per-number detail nahi bhejte (page tez rahe)
 FILES_LIMIT = 1000          # By File view me max files
 FILE_LIST_CAP = 200         # har file ke liye max itne numbers ki list bhejte hain (count hamesha poora)
