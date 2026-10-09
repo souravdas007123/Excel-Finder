@@ -58,6 +58,10 @@
                 <span id="bulkBtnText">Search Database</span>
             </button>
             <button id="clearBtn" class="btn-secondary" type="button">Clear</button>
+            <div class="history-wrap">
+                <button id="historyBtn" class="btn-secondary" type="button" aria-haspopup="true" aria-expanded="false">Recent searches &#9662;</button>
+                <div id="historyPanel" class="history-panel" role="menu" hidden></div>
+            </div>
         </div>
     </div>
 
@@ -248,6 +252,106 @@
         } catch (e) { /* private mode / storage full: koi baat nahi */ }
     }
     function forgetSearch() { try { localStorage.removeItem(STORE_KEY); } catch (e) {} }
+
+
+    /* ---- recent searches (last 10, saved in this browser) ---- */
+    const HISTORY_KEY = 'excelFinder.bulkHistory.v1', HISTORY_MAX = 10, HISTORY_MAX_CHARS = 200000;
+    const historyBtn = $('historyBtn'), historyPanel = $('historyPanel');
+    let historyConfirmClear = null;
+
+    function readHistory() {
+        try {
+            const h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+            return Array.isArray(h) ? h.filter((e) => e && typeof e.input === 'string') : [];
+        } catch (e) { return []; }
+    }
+    function writeHistory(list) { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch (e) {} }
+    function uniqueNumbers(text) {
+        const seen = new Set();
+        text.split(/[,;\n]+/).forEach((p) => { const n = p.replace(/\D/g, ''); if (n.length >= MIN_DIGITS) seen.add(n); });
+        return [...seen];
+    }
+    function addHistory(text) {
+        const nums = uniqueNumbers(text);
+        if (!nums.length || text.length > HISTORY_MAX_CHARS) return;
+        const sig = nums.join(',');
+        const list = readHistory().filter((e) => e.sig !== sig);   // wahi search dobara ho toh upar aa jaye, double na ho
+        list.unshift({ sig, input: text, count: nums.length, preview: nums.slice(0, 3).join(', '), ts: Date.now(), last10: last10On() });
+        writeHistory(list.slice(0, HISTORY_MAX));
+        renderHistory();
+    }
+    function timeAgo(ts) {
+        const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+        if (s < 60) return 'just now';
+        if (s < 3600) return Math.round(s / 60) + ' min ago';
+        if (s < 86400) return Math.round(s / 3600) + ' h ago';
+        if (s < 7 * 86400) return Math.round(s / 86400) + ' day' + (Math.round(s / 86400) === 1 ? '' : 's') + ' ago';
+        return new Date(ts).toLocaleDateString();
+    }
+    function closeHistory() {
+        historyPanel.hidden = true;
+        historyBtn.setAttribute('aria-expanded', 'false');
+        historyConfirmClear = null;
+    }
+    function renderHistory() {
+        const list = readHistory();
+        historyBtn.textContent = (list.length ? `Recent searches (${list.length})` : 'Recent searches') + ' ▾';
+        historyPanel.replaceChildren();
+        if (!list.length) {
+            historyPanel.appendChild(el('div', 'No searches yet. Your last 10 searches will appear here.', 'history-empty'));
+            return;
+        }
+        list.forEach((e, i) => {
+            const row = el('div', undefined, 'history-row');
+            const open = el('button', undefined, 'history-item');
+            open.type = 'button';
+            open.setAttribute('role', 'menuitem');
+            open.appendChild(el('span', e.preview + (e.count > 3 ? ' …' : ''), 'history-nums'));
+            open.appendChild(el('span', `${fmt(e.count)} number${e.count === 1 ? '' : 's'} · ${timeAgo(e.ts)}`, 'history-meta'));
+            open.addEventListener('click', () => {
+                input.value = e.input;
+                $('last10').checked = e.last10 !== '0';
+                updateCounter();
+                closeHistory();
+                runSearch(false);
+            });
+            const del = el('button', '✕', 'history-del');
+            del.type = 'button';
+            del.title = 'Remove from history';
+            del.setAttribute('aria-label', 'Remove this search from history');
+            del.addEventListener('click', () => {
+                writeHistory(readHistory().filter((x) => x.sig !== e.sig));
+                renderHistory();
+            });
+            row.appendChild(open);
+            row.appendChild(del);
+            historyPanel.appendChild(row);
+        });
+        const clear = el('button', 'Clear history', 'history-clear');
+        clear.type = 'button';
+        clear.addEventListener('click', () => {
+            if (historyConfirmClear !== clear) {   /* pehli click: confirm maango */
+                historyConfirmClear = clear;
+                clear.textContent = 'Click again to clear all';
+                setTimeout(() => { if (historyConfirmClear === clear) { historyConfirmClear = null; clear.textContent = 'Clear history'; } }, 3000);
+                return;
+            }
+            writeHistory([]);
+            historyConfirmClear = null;
+            renderHistory();
+        });
+        historyPanel.appendChild(clear);
+    }
+    historyBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const open = historyPanel.hidden;
+        if (open) { renderHistory(); historyPanel.hidden = false; }
+        else closeHistory();
+        historyBtn.setAttribute('aria-expanded', String(open));
+    });
+    document.addEventListener('click', (ev) => { if (!historyPanel.hidden && !ev.target.closest('.history-wrap')) closeHistory(); });
+    document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !historyPanel.hidden) { closeHistory(); historyBtn.focus(); } });
+    renderHistory();
 
     /* ---- live counter ---- */
     function updateCounter() {
@@ -733,6 +837,7 @@
             setTab('files');
             $('bulkResultContainer').style.display = 'flex';
             saveSearch(numbers);
+            if (!auto) addHistory(numbers);
         } catch (e) {
             if (auto) {
                 const note = $('restoreNote');
