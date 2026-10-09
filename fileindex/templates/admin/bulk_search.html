@@ -114,6 +114,7 @@
                 <button class="filter-btn active" data-filter="all" type="button">All</button>
                 <button class="filter-btn" data-filter="found" type="button">Found</button>
                 <button class="filter-btn" data-filter="missing" type="button">Not Found</button>
+                <button class="filter-btn" data-filter="multi" type="button" title="Numbers that appear in more than one file">In multiple files</button>
             </div>
             <div class="table-scroll">
                 <table class="result-table" style="border: none;">
@@ -195,7 +196,7 @@
     const searchBtn = $('bulkSearchBtn'), searchText = $('bulkBtnText');
     const input = $('bulkNumbers');
     const state = {
-        allFiles: [], files: [], results: [], missing: [], input: '', detail: true, last10: '1',
+        allFiles: [], files: [], results: [], missing: [], multi: new Map(), input: '', detail: true, last10: '1',
         filter: 'all', fileShown: PAGE, fileRendered: 0, numShown: PAGE, numRendered: 0,
     };
 
@@ -265,7 +266,7 @@
     $('clearBtn').addEventListener('click', () => {
         input.value = '';
         updateCounter();
-        state.allFiles = []; state.files = []; state.results = []; state.missing = [];
+        state.allFiles = []; state.files = []; state.results = []; state.missing = []; state.multi = new Map();
         $('bulkResultContainer').style.display = 'none';
         $('restoreNote').hidden = true;
         forgetSearch();
@@ -481,7 +482,12 @@
                 `number${f.numbers_count === 1 ? '' : 's'} · ${fmt(f.matches)} match${f.matches === 1 ? '' : 'es'}`, 'count-line'));
 
             const numCell = tr.insertCell();
-            f.numbers.slice(0, PREVIEW).forEach((n) => numCell.appendChild(el('span', n, 'num-chip')));
+            f.numbers.slice(0, PREVIEW).forEach((n) => {
+                const k = state.multi.get(n);
+                const chip = el('span', n, 'num-chip' + (k ? ' multi' : ''));
+                if (k) chip.title = `Also found in ${k - 1} other file${k === 2 ? '' : 's'}`;
+                numCell.appendChild(chip);
+            });
             const rest = f.numbers_count - Math.min(PREVIEW, f.numbers.length);
             if (rest > 0) numCell.appendChild(el('span', `+ ${fmt(rest)} more`, 'num-chip more'));
 
@@ -546,7 +552,11 @@
     function visibleRows() {
         return state.results
             .map((item, idx) => ({ item, idx }))
-            .filter(({ item }) => state.filter === 'all' || (state.filter === 'found') === item.found);
+            .filter(({ item }) => {
+                const f = state.filter;
+                return f === 'all' || (f === 'found' && item.found) || (f === 'missing' && !item.found)
+                    || (f === 'multi' && item.file_count > 1);
+            });
     }
 
     function renderNumbers(reset) {
@@ -564,7 +574,8 @@
             statusCell.appendChild(el('span', item.found ? 'Found' : 'Not Found', item.found ? 'badge-success' : 'badge-danger'));
             if (item.found) {
                 statusCell.appendChild(el('div',
-                    `${item.file_count} file${item.file_count > 1 ? 's' : ''} · ${item.total} match${item.total > 1 ? 'es' : ''}`, 'count-line'));
+                    `${item.file_count} file${item.file_count > 1 ? 's' : ''} · ${item.total} match${item.total > 1 ? 'es' : ''}`,
+                    'count-line' + (item.file_count > 1 ? ' multi-line' : '')));
             }
 
             const where = tr.insertCell();
@@ -632,6 +643,7 @@
             el('span', `Not found: ${fmt(s.not_found)}`, 'chip bad'),
             el('span', `Files with matches: ${fmt(s.files)}`, 'chip')
         );
+        if (state.multi.size) chips.appendChild(el('span', `In 2+ files: ${fmt(state.multi.size)}`, 'chip warn'));
         if (s.duplicates) chips.appendChild(el('span', `Duplicates removed: ${fmt(s.duplicates)}`, 'chip'));
 
         const notes = $('bulkNotes');
@@ -639,6 +651,9 @@
         if (s.skipped.length) {
             notes.appendChild(el('div', `Ignored (fewer than ${s.min_digits} digits): ${s.skipped.slice(0, 20).join(', ')}` +
                 (s.skipped.length > 20 ? ` ... and ${s.skipped.length - 20} more` : ''), 'note'));
+        }
+        if (state.multi.size) {
+            notes.appendChild(el('div', 'Orange numbers appear in more than one file. Use the "In multiple files" filter under By Number to list them.', 'note'));
         }
         if (s.truncated) {
             notes.appendChild(el('div', `Only the first ${fmt(s.max_numbers)} numbers were searched.`, 'note'));
@@ -700,6 +715,7 @@
             state.allFiles = data.files;
             $('fileFilter').value = '';
             state.results = data.results;
+            state.multi = new Map(data.results.filter((r) => r.file_count > 1).map((r) => [r.number, r.file_count]));
             state.missing = data.not_found;
             state.input = numbers;
             state.last10 = data.summary.last10 ? '1' : '0';
