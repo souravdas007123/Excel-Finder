@@ -5,7 +5,6 @@ import tempfile
 import threading
 from collections import Counter, defaultdict
 from datetime import datetime
-from django.shortcuts import render
 
 from django.conf import settings
 from django.contrib.admin.views.decorators import staff_member_required

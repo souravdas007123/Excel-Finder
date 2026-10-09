@@ -10,7 +10,10 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -19,13 +22,39 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
+# ---- Local vs server ----
+# Apne computer par kuch set karne ki zarurat nahi (neeche ke defaults local ke liye hain).
+# Server par daalna ho toh ye environment variables set karo:
+#   DJANGO_DEBUG=0
+#   DJANGO_SECRET_KEY=<lamba random secret>
+#   DJANGO_ALLOWED_HOSTS=example.com,www.example.com
+#   DJANGO_CSRF_TRUSTED_ORIGINS=https://example.com      (https ke peeche ho toh)
+def _env_bool(name, default):
+    value = os.environ.get(name)
+    return default if value is None else value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _env_list(name):
+    return [item.strip() for item in os.environ.get(name, '').split(',') if item.strip()]
+
+
+_INSECURE_DEV_KEY = 'django-insecure-9cfi4a=7i8xv0x)^nh8_ycjhse7hmt4n6q!n*-dugzjdfhtx3$'
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-9cfi4a=7i8xv0x)^nh8_ycjhse7hmt4n6q!n*-dugzjdfhtx3$'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', _INSECURE_DEV_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_bool('DJANGO_DEBUG', True)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = _env_list('DJANGO_ALLOWED_HOSTS')
+CSRF_TRUSTED_ORIGINS = _env_list('DJANGO_CSRF_TRUSTED_ORIGINS')
+
+if not DEBUG:
+    if SECRET_KEY == _INSECURE_DEV_KEY:
+        raise ImproperlyConfigured('DJANGO_DEBUG=0 ke saath DJANGO_SECRET_KEY set karna zaruri hai.')
+    # Sirf https par cookies bhejo (http par chalana ho toh DJANGO_SECURE_COOKIES=0)
+    SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = _env_bool('DJANGO_SECURE_COOKIES', True)
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 
 # Application definition
@@ -119,6 +148,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'   # server par: python manage.py collectstatic
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
