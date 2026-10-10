@@ -47,6 +47,7 @@
     function openModal() { var m = $("#modal"); if (m && !m.open) { m.showModal(); } }
     function closeModal() { var m = $("#modal"); if (m && m.open) { m.close(); } }
     window.addEventListener("closeModal", closeModal);
+    window.addEventListener("resetBrowserData", function () { try { localStorage.removeItem("excelFinder.bulkHistory.v1"); } catch (e) { /* private mode */ } });
     doc.addEventListener("click", function (e) { if (e.target && e.target.id === "modal") { closeModal(); } });   // bahar click
     doc.addEventListener("htmx:afterSwap", function (e) {
         if (e.detail.target && e.detail.target.id === "modal-body") { openModal(); }

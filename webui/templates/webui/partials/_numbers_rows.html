@@ -10,7 +10,7 @@
         {% for m in r.matches %}
         <div class="hit">
             <div style="min-width:0">
-                <div class="fname">{{ m.file }}</div>
+                <div class="fname hit">{{ m.file }}</div>
                 <div class="where">{{ m.folder }}</div>
                 <div class="where">Sheet <b>{{ m.sheet|default:"—" }}</b> · row <b>{{ m.row }}</b>{% if m.column %} · column <b>{{ m.column }}</b>{% endif %}{% if m.stored %} · written as <span class="mono">{{ m.stored }}</span>{% endif %}</div>
             </div>

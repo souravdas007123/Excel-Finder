@@ -15,7 +15,7 @@ from licensing.service import record_usage
 
 from .drives import get_scan_locations
 from .excel_parser import extract_numbers, match_key, parse_file, read_row
-from .models import FileIndex, NumberIndex, ScanTask
+from .models import FileIndex, NumberIndex, ScanFailure, ScanTask
 from .report import build_report
 from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, cancel_event, run_scan, scan_lock, scan_progress
 
@@ -411,8 +411,20 @@ def file_report(upload, first_col=False, last10=True):
     return data, None, None
 
 
-def clear_index(user):
-    """Poora index hatao. (files_removed, None, None) ya (None, error, http status)."""
+def _shrink_database():
+    """Index saaf hone ke baad database file ka size chhota karo (background me). Koi dusra kaam chal raha ho toh chhod do."""
+    try:
+        with connection.cursor() as cur:
+            cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            cur.execute("VACUUM")
+    except Exception:
+        pass
+    finally:
+        connection.close()
+
+
+def clear_index(user, history=False):
+    """Poora index hatao (history=True: scan history bhi). (files_removed, None, None) ya (None, error, http status)."""
     if not user.has_perm("fileindex.delete_fileindex"):
         return None, "You do not have permission to clear the index", 403
     if not scan_lock.acquire(blocking=False):   # lock pakda rehta hai, isliye clear ke dauraan naya scan shuru nahi hoga
@@ -424,11 +436,11 @@ def clear_index(user):
             # Raw DELETE: Django ke .delete() se bahut tez (10 lakh rows < 1 second)
             cur.execute(f"DELETE FROM {qn(NumberIndex._meta.db_table)}")
             cur.execute(f"DELETE FROM {qn(FileIndex._meta.db_table)}")
+            if history:
+                cur.execute(f"DELETE FROM {qn(ScanFailure._meta.db_table)}")
+                cur.execute(f"DELETE FROM {qn(ScanTask._meta.db_table)}")
         if connection.vendor == "sqlite":
-            try:
-                connection.cursor().execute("VACUUM")   # database file ka size bhi chhota ho jata hai
-            except Exception:
-                pass
+            threading.Thread(target=_shrink_database, daemon=True).start()   # file chhoti karna peeche chalta hai: screen na ruke
     finally:
         scan_lock.release()
     return files_removed, None, None
