@@ -20,6 +20,8 @@ class LicenseMiddleware:
         if service.enforced() and path.startswith("/admin/") and not path.startswith(ALLOWED_PREFIXES):
             status = service.current_status()
             if not status.ok:
+                if status.code == "pending":      # plan ka intezaar: har 5 minute me khud dekho ki seller ne diya ya nahi
+                    service.maybe_background_check()
                 if path.endswith("-api/"):      # page ke andar se aayi API call: JSON me wajah
                     return JsonResponse({"error": status.message, "license": status.code}, status=402)
                 return redirect(reverse("admin:licensing_licensestate_changelist"))

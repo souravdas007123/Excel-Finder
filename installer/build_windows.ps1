@@ -106,7 +106,10 @@ try {
               "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
     if ($iscc) {
         Run $iscc @("/Qp", "/DAppVersion=$version", "/DAppPublisher=$Publisher", "installer\ExcelFinder.iss")
-        Write-Host "`nInstaller ready: dist\installer\ExcelFinder-Setup-$version.exe" -ForegroundColor Green
+        $setup = "dist\installer\ExcelFinder-Setup-$version.exe"
+        Write-Host "`nInstaller ready: $setup" -ForegroundColor Green
+        $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower()
+        Write-Host "SHA-256 (paste in License Server admin > App releases, for one-click updates): $hash" -ForegroundColor Cyan
         Write-Host "Sign it with your code-signing certificate before selling (see installer\README.md)." -ForegroundColor Yellow
     } else {
         $zip = "dist\ExcelFinder-portable-$version.zip"

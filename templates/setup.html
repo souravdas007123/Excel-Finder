@@ -20,12 +20,33 @@
     button:hover { background: var(--brand-dark); }
     .errors { margin: 0 0 8px; padding: 10px 14px; border-radius: 8px; background: rgba(220,53,69,.12); color: var(--bad); font-size: 14px; list-style: none; }
     .errors li + li { margin-top: 4px; }
+    .note a { color: var(--brand); }
     .note { margin-top: 16px; font-size: 12.5px; color: var(--quiet); }
 </style>
 </head>
 <body>
 <form class="card" method="post" autocomplete="off">
     {% csrf_token %}
+    {% if account_mode %}
+    <input type="hidden" name="mode" value="{{ mode }}">
+    <h1>{% if mode == "signin" %}Sign in to Excel Finder{% else %}Create your account{% endif %}</h1>
+    <p class="sub">{% if mode == "signin" %}Use the email and password you registered with.{% else %}This is your Excel Finder account. After you sign up, the seller gives you access.{% endif %} An internet connection is needed for this step.</p>
+    {% if errors %}<ul class="errors">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+    {% if mode != "signin" %}
+    <label for="name">Your name</label>
+    <input id="name" name="name" value="{{ form.name }}" required autofocus autocomplete="name">
+    {% endif %}
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" value="{{ form.email }}" required {% if mode == "signin" %}autofocus{% endif %} autocomplete="email">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" required minlength="8" autocomplete="{% if mode == "signin" %}current-password{% else %}new-password{% endif %}">
+    {% if mode != "signin" %}
+    <label for="confirm">Confirm password</label>
+    <input id="confirm" name="confirm" type="password" required minlength="8" autocomplete="new-password">
+    {% endif %}
+    <button type="submit">{% if mode == "signin" %}Sign in{% else %}Create account and continue{% endif %}</button>
+    <p class="note">{% if mode == "signin" %}No account yet? <a href="?mode=register">Create one</a>.{% else %}Use at least 8 characters. Already have an account? <a href="?mode=signin">Sign in</a>.{% endif %}</p>
+    {% else %}
     <h1>Welcome to Excel Finder</h1>
     <p class="sub">Create the administrator account for this computer. You will use it to sign in.</p>
     {% if errors %}<ul class="errors">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
@@ -37,6 +58,7 @@
     <input id="confirm" name="confirm" type="password" required minlength="8">
     <button type="submit">Create account and continue</button>
     <p class="note">Use at least 8 characters. Write the password down somewhere safe: it cannot be recovered from the app.</p>
+    {% endif %}
 </form>
 </body>
 </html>

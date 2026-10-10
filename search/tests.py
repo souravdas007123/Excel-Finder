@@ -14,10 +14,10 @@ from pathlib import Path
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
-from licensing import protocol
+from licensing import protocol, service
 from . import middleware as first_run
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +28,81 @@ def load_module(name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@override_settings(LICENSE_ENFORCED=True)
+class AccountSetupTests(TestCase):
+    """Bechne wali app: pehla page customer ka ACCOUNT banata hai (server par) aur wahi is PC ka login bhi hai."""
+
+    def setUp(self):
+        first_run.reset_first_run_cache()
+        self.addCleanup(first_run.reset_first_run_cache)
+        self.register = mock.patch.object(service, "register", return_value=service.Result(True, "ok"))
+        self.signin = mock.patch.object(service, "login", return_value=service.Result(True, "ok"))
+        self.register_mock, self.login_mock = self.register.start(), self.signin.start()
+        self.addCleanup(self.register.stop)
+        self.addCleanup(self.signin.stop)
+
+    DATA = {"name": "Ravi", "email": "Ravi@Example.com", "password": "Str0ng-Pass-77", "confirm": "Str0ng-Pass-77"}
+
+    def test_page_asks_for_name_email_and_password(self):
+        r = self.client.get("/setup/")
+        self.assertContains(r, "Create your account")
+        for field in ('name="name"', 'name="email"', 'name="password"', 'name="confirm"'):
+            self.assertContains(r, field)
+        self.assertNotContains(r, 'name="username"')
+
+    def test_signup_creates_the_server_account_and_the_local_login(self):
+        r = self.client.post("/setup/", self.DATA)
+        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+        self.register_mock.assert_called_once_with("Ravi", "ravi@example.com", "Str0ng-Pass-77")
+        user = get_user_model().objects.get()
+        self.assertEqual((user.username, user.email, user.is_superuser), ("ravi@example.com", "ravi@example.com", True))
+        self.assertTrue(user.check_password("Str0ng-Pass-77"))
+        self.assertIn("_auth_user_id", self.client.session)          # seedha login ho gaya
+
+    def test_server_refusal_creates_no_local_user(self):
+        self.register_mock.return_value = service.Result(False, "An account with this email already exists.")
+        r = self.client.post("/setup/", self.DATA)
+        self.assertContains(r, "already exists")
+        self.assertFalse(get_user_model().objects.exists())
+
+    def test_offline_gives_a_clear_message_and_creates_nothing(self):
+        self.register_mock.return_value = service.Result(False, "Could not reach the license server. Please check your internet connection.")
+        r = self.client.post("/setup/", self.DATA)
+        self.assertContains(r, "internet connection")
+        self.assertFalse(get_user_model().objects.exists())
+
+    def test_bad_input_never_reaches_the_server(self):
+        for change in ({"email": "nope"}, {"name": " "}, {"confirm": "Different-Pass-1"}, {"password": "short", "confirm": "short"},
+                       {"password": "password", "confirm": "password"}):
+            r = self.client.post("/setup/", {**self.DATA, **change})
+            self.assertEqual(r.status_code, 200, change)
+            self.assertContains(r, 'class="errors"')
+        self.register_mock.assert_not_called()
+        self.assertFalse(get_user_model().objects.exists())
+
+    def test_existing_customer_can_sign_in_on_a_new_pc(self):
+        page = self.client.get("/setup/?mode=signin")
+        self.assertContains(page, "Sign in to Excel Finder")
+        self.assertNotContains(page, 'name="confirm"')
+        r = self.client.post("/setup/", {"mode": "signin", "email": "ravi@example.com", "password": "Str0ng-Pass-77"})
+        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+        self.login_mock.assert_called_once_with("ravi@example.com", "Str0ng-Pass-77")
+        self.register_mock.assert_not_called()
+        self.assertTrue(get_user_model().objects.filter(username="ravi@example.com").exists())
+
+    def test_wrong_password_on_sign_in_creates_nothing(self):
+        self.login_mock.return_value = service.Result(False, "Wrong email or password.")
+        r = self.client.post("/setup/", {"mode": "signin", "email": "ravi@example.com", "password": "nope-nope-1"})
+        self.assertContains(r, "Wrong email or password")
+        self.assertFalse(get_user_model().objects.exists())
+
+    def test_setup_is_closed_once_an_account_exists(self):
+        get_user_model().objects.create_superuser("owner", "o@example.com", "Str0ng-Pass-77")
+        r = self.client.post("/setup/", self.DATA)
+        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+        self.register_mock.assert_not_called()
 
 
 class FirstRunSetupTests(TestCase):

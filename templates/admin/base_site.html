@@ -27,15 +27,24 @@
     .update-banner a.ub-btn { background: #417690; color: #fff; }
     .update-banner button { background: transparent; color: var(--body-fg, #333); border-color: var(--border-color, #bbb); }
     .update-banner form { margin: 0; }
+    .update-banner button.ub-main { background: #417690; color: #fff; }
+    .update-banner button:disabled { opacity: .6; cursor: default; }
+    .update-banner a.ub-btn.ub-alt { background: transparent; color: var(--body-fg, #333); border-color: var(--border-color, #bbb); }
+    .update-banner .ub-progress { flex-basis: 100%; font-weight: 600; }
 </style>
 <div class="update-banner{% if update_notice.critical %} critical{% endif %}" role="status">
     <div class="ub-text">
         <b>Excel Finder {{ update_notice.version }} is available</b> (you have {{ update_notice.current }}).
         {% if update_notice.critical %}<b>This update is required: your version is no longer supported.</b>{% endif %}
         {% if update_notice.notes %}<ul>{% for note in update_notice.notes %}<li>{{ note }}</li>{% endfor %}</ul>{% endif %}
+        <div class="ub-progress" id="ub-progress" aria-live="polite"></div>
     </div>
     <div class="ub-actions">
-        <a class="ub-btn" href="{{ update_notice.download_url }}" target="_blank" rel="noopener noreferrer">Download</a>
+        {% if update_notice.one_click %}
+        <form id="ub-form" method="post" action="#">{% csrf_token %}</form>
+        <button type="button" id="ub-install" class="ub-main" data-install="{% url 'update_install' %}" data-status="{% url 'update_status' %}"{% if update_notice.installing %} disabled{% endif %}>Update now</button>
+        {% endif %}
+        <a class="ub-btn{% if update_notice.one_click %} ub-alt{% endif %}" href="{{ update_notice.download_url }}" target="_blank" rel="noopener noreferrer">Download</a>
         {% if not update_notice.critical %}
         <form method="post" action="{% url 'update_dismiss' %}">{% csrf_token %}
             <input type="hidden" name="version" value="{{ update_notice.version }}">
@@ -45,6 +54,37 @@
         {% endif %}
     </div>
 </div>
+{% if update_notice.one_click %}
+<script>
+(function () {
+    var button = document.getElementById('ub-install'), box = document.getElementById('ub-progress');
+    if (!button) { return; }
+    var csrf = document.querySelector('#ub-form [name=csrfmiddlewaretoken]').value, down = false;
+    function show(text) { box.textContent = text; }
+    function poll() {
+        fetch(button.dataset.status, {credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(function (d) {
+            if (down) { location.reload(); return; }                     // app band hokar naya khul gaya
+            show(d.message || '');
+            if (d.state === 'downloading' || d.state === 'installing') { setTimeout(poll, 1000); }
+            else if (d.state === 'error') { button.disabled = false; }
+        }).catch(function () {
+            down = true;                                                  // installer app band kar chuka: wapas aane tak ruko
+            show('Installing the new version. This page will refresh by itself...');
+            setTimeout(poll, 2000);
+        });
+    }
+    button.addEventListener('click', function () {
+        button.disabled = true;
+        show('Starting...');
+        fetch(button.dataset.install, {method: 'POST', credentials: 'same-origin', headers: {'X-CSRFToken': csrf}})
+            .then(function (r) { return r.json(); })
+            .then(function (d) { show(d.message || ''); if (d.ok) { poll(); } else { button.disabled = false; } })
+            .catch(function () { show('Could not start the update.'); button.disabled = false; });
+    });
+    if (button.disabled) { poll(); }
+})();
+</script>
+{% endif %}
 {% endif %}
 {{ block.super }}
 {% endblock messages %}

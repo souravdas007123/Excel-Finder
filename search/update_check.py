@@ -1,17 +1,22 @@
-"""'Naya version available hai' ka notice.
+"""'Naya version available hai' ka notice aur ek-click update.
 
-App sirf ek chhoti file padhta hai: website par rakhi `latest.json` (website/build_site.py banata hai). Kuch download ya
-install apne aap NAHI hota: customer ko banner me link dikhta hai, wo khud naya Setup.exe download karke chalata hai.
+App ek chhoti JSON padhta hai: license server ka `/api/v1/latest` (seller admin panel ke 'App releases' me version daalta
+hai) ya website ki `latest.json`. Customer ko banner me 'Update now' dikhta hai: app naya Setup.exe download karta hai,
+SHA-256 se jaanchta hai, phir chalakar khud band ho jata hai aur installer purane ko badal deta hai (data bacha rehta hai).
+Bina SHA-256 wale release me (ya Windows installed app ke bahar) sirf 'Download' link dikhta hai.
 
 latest.json ka namuna:
   {"version": "1.2.0", "released": "2026-11-01", "download_url": "https://example.com/download",
    "sha256": "...", "notes": ["Faster scans", "Bug fixes"], "min_version": "1.0.0"}
 `min_version`: isse purana version ho toh banner laal ("update zaruri") dikhta hai.
 """
+import hashlib
 import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -84,6 +89,21 @@ def _safe_download_url(url):
     raise ValueError("download_url must be an https:// link")
 
 
+DRIVE_FILE_RE = re.compile(r"^/file/d/([A-Za-z0-9_-]{10,})")
+DRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,}$")
+
+
+def direct_download_url(url):
+    """Google Drive ka share link ('.../file/d/ID/view') seedhe download link me badlo; baaki links jaise ke taise."""
+    parts = urllib.parse.urlparse(url)
+    if parts.hostname in ("drive.google.com", "docs.google.com"):
+        match = DRIVE_FILE_RE.match(parts.path)
+        file_id = match.group(1) if match else (urllib.parse.parse_qs(parts.query).get("id") or [""])[0]
+        if DRIVE_ID_RE.match(file_id):
+            return f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+    return url
+
+
 def validate_manifest(data):
     """latest.json ko saaf karke wapas do, ya ValueError. Is par bharosa nahi: sab kuch jaancha jata hai."""
     if not isinstance(data, dict):
@@ -114,7 +134,10 @@ def fetch_latest(timeout=6):
         raw = response.read(MAX_BYTES + 1)
     if len(raw) > MAX_BYTES:
         raise ValueError("latest.json is too large")
-    return validate_manifest(json.loads(raw.decode("utf-8")))
+    data = json.loads(raw.decode("utf-8"))
+    if isinstance(data, dict) and data.get("none"):       # seller ne abhi koi release nahi daali
+        return None
+    return validate_manifest(data)
 
 
 # ------------------------------------------------------------------ saved state (chhoti JSON file, database nahi)
@@ -158,7 +181,7 @@ def check_now():
         return Result(False, "The update information could not be read. Please try again later.")
     state.update(checked_at=_now().isoformat(), latest=latest, error="")
     _write(state)
-    if is_newer(latest["version"], VERSION):
+    if latest is not None and is_newer(latest["version"], VERSION):
         return Result(True, f"Version {latest['version']} is available (you have {VERSION}).")
     return Result(True, f"You have the latest version ({VERSION}).")
 
@@ -202,10 +225,133 @@ def current_notice():
     critical = bool(latest.get("min_version")) and is_newer(latest["min_version"], VERSION)
     if state.get("dismissed_version") == latest["version"] and not critical:
         return None
-    return {**latest, "current": VERSION, "critical": critical}
+    return {**latest, "current": VERSION, "critical": critical,
+            "one_click": can_install() and bool(latest.get("sha256")), "installing": _install["state"] in BUSY}
 
 
 def dismiss(version):
     state = _read()
     state["dismissed_version"] = str(version)[:20]
     _write(state)
+
+
+# ------------------------------------------------------------------ ek-click update (download + verify + install)
+BUSY = ("downloading", "installing")
+MAX_INSTALLER_BYTES = 1536 * 1024 * 1024
+CHUNK = 256 * 1024
+_install = {"state": "idle", "percent": 0, "message": ""}
+_install_lock = threading.Lock()
+
+
+def can_install():
+    """Sirf Windows par bane hue (installed) app me. Dusri jagah sirf Download link."""
+    return bool(getattr(settings, "UPDATE_CAN_INSTALL", sys.platform == "win32" and getattr(sys, "frozen", False)))
+
+
+def install_status():
+    return dict(_install)
+
+
+def _set(state, message, percent=None):
+    _install["state"], _install["message"] = state, message
+    if percent is not None:
+        _install["percent"] = percent
+
+
+def start_install():
+    """'Update now' dabane par: download alag thread me shuru. Result me turant jawab."""
+    latest = _read().get("latest") if enabled() else None
+    if not isinstance(latest, dict) or not is_newer(latest.get("version"), VERSION):
+        return Result(False, "There is no newer version to install.")
+    if not can_install():
+        return Result(False, "One-click update works only in the installed Windows app. Please use the Download link.")
+    if not SHA256_RE.match(str(latest.get("sha256", ""))):
+        return Result(False, "This release cannot be installed automatically. Please use the Download link.")
+    with _install_lock:
+        if _install["state"] in BUSY:
+            return Result(False, "The update is already in progress.")
+        _set("downloading", "Starting the download...", 0)
+    threading.Thread(target=_install_worker, args=(latest,), daemon=True).start()
+    return Result(True, "Downloading the update...")
+
+
+def _updates_dir():
+    folder = Path(settings.DATA_DIR) / "updates"
+    folder.mkdir(parents=True, exist_ok=True)
+    for old in folder.iterdir():                       # purane adhure / puraane installers hatao
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return folder
+
+
+def _download(url, target, expected_sha, progress):
+    """File utarkar uska SHA-256 return karo. Bahut bada / Google ka web page ho toh ValueError."""
+    request = urllib.request.Request(direct_download_url(url), headers={"User-Agent": f"ExcelFinder/{VERSION}"})
+    digest, done = hashlib.sha256(), 0
+    with urllib.request.urlopen(request, timeout=30) as response, open(target, "wb") as out:
+        total = int(response.headers.get("Content-Length") or 0)
+        first = True
+        while True:
+            chunk = response.read(CHUNK)
+            if not chunk:
+                break
+            if first:
+                first = False
+                if not chunk.startswith(b"MZ"):        # Windows program nahi: shayad Drive ka web page
+                    raise ValueError("The download link did not give the installer file (it gave a web page). "
+                                     "Check that the file is shared as 'Anyone with the link', or use the Download link.")
+            done += len(chunk)
+            if done > MAX_INSTALLER_BYTES:
+                raise ValueError("The download is unexpectedly large, so it was stopped.")
+            digest.update(chunk)
+            out.write(chunk)
+            progress(done, total)
+    if done == 0:
+        raise ValueError("The download was empty.")
+    return digest.hexdigest()
+
+
+def _launch(path):
+    flags = (0x00000008 | 0x00000200) if sys.platform == "win32" else 0     # DETACHED_PROCESS | NEW_PROCESS_GROUP
+    subprocess.Popen([str(path), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
+                     close_fds=True, creationflags=flags)
+
+
+def _exit_soon():
+    """Installer purani files badal sake isliye app band: 2 second baad (jawab bhej dene ke baad)."""
+    threading.Timer(2.0, os._exit, args=(0,)).start()
+
+
+def _install_worker(latest):
+    target = None
+    try:
+        folder = _updates_dir()
+        target = folder / f"ExcelFinder-Setup-{latest['version']}.exe"
+
+        def progress(done, total):
+            percent = int(done * 100 / total) if total else 0
+            _set("downloading", f"Downloading... {percent}%" if total else f"Downloading... {done // (1024 * 1024)} MB", percent)
+
+        actual = _download(latest["download_url"], target, latest["sha256"], progress)
+        if actual != latest["sha256"]:
+            target.unlink(missing_ok=True)
+            raise ValueError("The downloaded file does not match the expected checksum, so it was NOT installed. "
+                             "Please try again or contact support.")
+        _set("installing", "Installing the new version. The app will close and open again by itself...", 100)
+        _launch(target)
+        _exit_soon()
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        logger.warning("Update download failed: %s", exc)
+        _set("error", "The download failed. Please check your internet connection and try again.")
+    except ValueError as exc:
+        _set("error", str(exc))
+    except Exception:
+        logger.exception("Update install failed")
+        _set("error", "The update could not be installed. Please use the Download link.")
+    if _install["state"] == "error" and target is not None:
+        try:
+            Path(target).unlink(missing_ok=True)
+        except OSError:
+            pass

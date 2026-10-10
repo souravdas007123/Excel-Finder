@@ -230,6 +230,8 @@ else:
     LICENSE_BUY_URL = os.environ.get("EXCEL_FINDER_LICENSE_BUY_URL", "")
     LICENSE_SUPPORT = os.environ.get("EXCEL_FINDER_LICENSE_SUPPORT", "")
     UPDATE_CHECK_URL = os.environ.get("EXCEL_FINDER_UPDATE_URL", "")
+if not UPDATE_CHECK_URL and LICENSE_SERVER_URL:     # alag update address na ho toh license server hi batata hai naya version
+    UPDATE_CHECK_URL = LICENSE_SERVER_URL.rstrip('/') + '/api/v1/latest'
 LICENSE_CHECK_INTERVAL_HOURS = 24   # app online ho toh itne ghante me ek baar server se check
 LICENSE_WARN_DAYS = 14              # expiry se itne din pehle chetavni
 UPDATE_CACHE_FILE = DATA_DIR / 'update_info.json'   # 'naya version' ki jaankari (chhoti JSON file)

@@ -21,8 +21,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 TOKEN_VERSION = 1
-TYPES = ("trial", "yearly", "lifetime")
-TYPE_LABELS = {"trial": "Free trial", "yearly": "Yearly license", "lifetime": "Lifetime license"}
+TYPES = ("trial", "monthly", "yearly", "lifetime")
+PENDING = "pending"        # account ban gaya, seller ne abhi plan nahi diya (token tab tak nahi milta)
+TYPE_LABELS = {"trial": "Free trial", "monthly": "Monthly plan", "yearly": "Yearly plan", "lifetime": "Lifetime plan"}
 
 KEY_PREFIX = "EXFN"
 _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"    # 0/O aur 1/I nahi: key padhne me galti na ho
@@ -160,7 +161,8 @@ def _fmt_date(dt):
 BLOCK_DEFAULTS = {
     "revoked": "This license has been disabled. Please contact support.",
     "expired": "Your license has expired. Please renew to continue.",
-    "not_activated": "This PC is no longer activated for the license. Please activate again.",
+    "not_activated": "This PC is no longer signed in. Please sign in again.",
+    "pending": "Your account is created and waiting for approval. You will get access as soon as the seller activates your plan.",
 }
 
 
