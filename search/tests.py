@@ -188,11 +188,11 @@ class BuildConfigTests(SimpleTestCase):
         _, public = protocol.generate_keypair()
         with tempfile.TemporaryDirectory() as tmp:
             out = str(Path(tmp) / "c.py")
-            r = self.run_script("--server", "http://license.example.com", "--public-key", public, "--out", out)
+            r = self.run_script("--server", "http://license.example.com", f"--public-key={public}", "--out", out)
             self.assertNotEqual(r.returncode, 0)
             self.assertIn("https://", r.stderr)
-            self.assertEqual(self.run_script("--server", "http://127.0.0.1:8800", "--allow-http", "--public-key", public, "--out", out).returncode, 0)
-            r = self.run_script("--server", "https://x.example", "--public-key", "not-a-key", "--out", out)
+            self.assertEqual(self.run_script("--server", "http://127.0.0.1:8800", "--allow-http", f"--public-key={public}", "--out", out).returncode, 0)
+            r = self.run_script("--server", "https://x.example", "--public-key=not-a-key", "--out", out)
             self.assertNotEqual(r.returncode, 0)
             self.assertIn("public key", r.stderr)
 

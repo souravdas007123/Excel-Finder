@@ -35,44 +35,24 @@
         {% endif %}
     </div>
 
-    {% if can_manage and not signed_in %}
-    <div class="grid cols-2">
-        <div class="card">
-            <div class="card-head"><h2>{% icon "user" 18 %} Sign in</h2></div>
-            <form class="stack" style="gap:12px" hx-post="{% url 'webui:license_login' %}" hx-target="#license-panel" hx-swap="outerHTML">
-                <input type="email" name="email" placeholder="Email" autocomplete="username" required aria-label="Email">
-                <input type="password" name="password" placeholder="Password" autocomplete="current-password" required aria-label="Password">
-                <button class="btn btn-primary" type="submit"><span class="spin"></span> Sign in</button>
-            </form>
-        </div>
-        <div class="card">
-            <div class="card-head"><h2>{% icon "shield" 18 %} Create an account</h2></div>
-            <form class="stack" style="gap:12px" hx-post="{% url 'webui:license_register' %}" hx-target="#license-panel" hx-swap="outerHTML">
-                <input type="text" name="name" placeholder="Your name" autocomplete="name" required aria-label="Name">
-                <input type="email" name="email" placeholder="Email" autocomplete="email" required aria-label="Email">
-                <div class="row" style="flex-wrap:nowrap"><input type="password" name="password" placeholder="Password (8+ characters)" minlength="8" autocomplete="new-password" required aria-label="Password"><input type="password" name="confirm" placeholder="Confirm" minlength="8" autocomplete="new-password" required aria-label="Confirm password"></div>
-                <button class="btn btn-primary" type="submit"><span class="spin"></span> Create account</button>
-                <p class="hint">After you create the account, the seller gives you access (monthly, yearly or lifetime).{% if buy_url %} <a href="{{ buy_url }}" target="_blank" rel="noopener">Buy or renew</a>.{% endif %}</p>
-            </form>
-        </div>
-    </div>
-    <div class="card">
-        <details>
-            <summary style="cursor:pointer;font-weight:600">I have a license key instead</summary>
-            <form class="row" style="margin-top:14px" hx-post="{% url 'webui:license_activate' %}" hx-target="#license-panel" hx-swap="outerHTML">
-                <input class="grow mono" type="text" name="key" placeholder="EXFN-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" spellcheck="false" required aria-label="License key" style="flex:1">
-                <button class="btn btn-primary" type="submit"><span class="spin"></span> Activate</button>
-            </form>
-        </details>
+    {% if enforced and can_manage and not signed_in %}
+    <div class="card" style="max-width:520px">
+        <div class="card-head"><h2>{% icon "user" 18 %} Sign in to your account</h2></div>
+        <form class="stack" style="gap:12px" hx-post="{% url 'webui:license_login' %}" hx-target="#license-panel" hx-swap="outerHTML">
+            <input type="email" name="email" placeholder="Email" autocomplete="username" required aria-label="Email">
+            <input type="password" name="password" placeholder="Password" autocomplete="current-password" required aria-label="Password">
+            <button class="btn btn-primary" type="submit"><span class="spin"></span> Sign in</button>
+        </form>
+        <p class="hint" style="margin-top:12px">Use the email and password you created when you first opened Excel Finder.Forgot the password, or no account yet? Contact the seller{% if support %} at <b>{{ support }}</b>{% endif %}.{% if buy_url %} <a href="{{ buy_url }}" target="_blank" rel="noopener">Buy or renew</a>.{% endif %}</p>
     </div>
     {% endif %}
 
-    {% if can_manage and signed_in or can_manage and has_license %}
+    {% if can_manage and signed_in %}
     <div class="card">
         <details>
-            <summary style="cursor:pointer;font-weight:600">{% if signed_in %}Use this account on another PC{% else %}Move this license to another PC{% endif %}</summary>
-            <p class="hint" style="margin:12px 0">{% if signed_in %}Signing out frees your account so you can sign in on a different computer. This PC will stop working until you sign in again.{% else %}Deactivating releases the license so you can activate it on a new computer.{% endif %} Your indexed data is not deleted.</p>
-            <button type="button" class="btn btn-danger" hx-post="{% url 'webui:license_signout' %}" hx-target="#license-panel" hx-swap="outerHTML">{% if signed_in %}Sign out of this PC{% else %}Deactivate this PC{% endif %}</button>
+            <summary style="cursor:pointer;font-weight:600">Use this account on another PC</summary>
+            <p class="hint" style="margin:12px 0">Signing out frees your account so you can sign in on a different computer. This PC will stop working until you sign in again. Your indexed data is not deleted.</p>
+            <button type="button" class="btn btn-danger" hx-post="{% url 'webui:license_signout' %}" hx-target="#license-panel" hx-swap="outerHTML">Sign out of this PC</button>
         </details>
     </div>
     {% endif %}
