@@ -12,7 +12,7 @@ class Command(BaseCommand):
         parser.add_argument("--type", choices=protocol.TYPES, default="yearly")
         parser.add_argument("--email", default="")
         parser.add_argument("--machines", type=int, default=1, help="Kitne PC par (default 1)")
-        parser.add_argument("--days", type=int, default=None, help="Yearly/trial ke din (default 365 / 14)")
+        parser.add_argument("--days", type=int, default=None, help="Monthly / yearly ke din (default 30 / 365)")
         parser.add_argument("--notes", default="")
 
     def handle(self, *args, **o):

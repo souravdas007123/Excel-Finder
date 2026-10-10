@@ -6,7 +6,7 @@
 {% block actions %}<a class="btn btn-sm" href="{% url 'webui:search' %}" {% navattrs %}>Next: Bulk search {% icon "arrow" 15 %}</a>{% endblock %}
 {% block content %}
 <div class="stack">
-    <div id="scan-stats" class="card" hx-get="{% url 'webui:scan' %}" hx-trigger="indexChanged from:body" hx-select="#scan-stats" hx-target="this" hx-swap="outerHTML">
+    <div id="scan-stats" class="card" hx-get="{% url 'webui:scan' %}" hx-trigger="indexChanged from:body" hx-select="#scan-stats" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">
         <div class="row" style="justify-content:space-between">
             <div>
                 {% if files %}<b style="font-size:18px">{{ files|comma }}</b> files &middot; <b style="font-size:18px">{{ numbers|comma }}</b> numbers indexed
@@ -50,12 +50,20 @@
         <div id="scan-live" style="margin-top:18px"{% if running %} hx-get="{% url 'webui:scan_status' %}?task={{ running.id }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}></div>
     </div>
 
-    {% if can_clear and files %}
+    <div id="scan-clear" hx-get="{% url 'webui:scan' %}" hx-trigger="indexChanged from:body" hx-select="#scan-clear" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">
+    {% if can_clear and has_data %}
     <div class="card">
-        <div class="card-head"><h2>{% icon "trash" 18 %} Clear the index</h2></div>
-        <p class="hint" style="margin-bottom:12px">Removes everything Excel Finder learned (the search index). Your Excel files on disk are never touched. You can scan again any time.</p>
-        <button type="button" class="btn btn-danger" hx-get="{% url 'webui:scan_clear' %}" hx-target="#modal-body">{% icon "trash" 16 %} Clear file index…</button>
+        <div class="card-head"><h2>{% icon "trash" 18 %} Clear or reset</h2></div>
+        <div class="row" style="align-items:flex-start;gap:24px">
+            <div class="grow"><b>Clear file index</b>
+                <p class="hint" style="margin:4px 0 10px">Removes the search index only. Scan history stays.</p>
+                <button type="button" class="btn btn-danger" hx-get="{% url 'webui:scan_clear' %}" hx-target="#modal-body">{% icon "trash" 16 %} Clear file index…</button></div>
+            <div class="grow"><b>Reset all data</b>
+                <p class="hint" style="margin:4px 0 10px">Fresh start: index, scan history and recent searches. Your login and license are kept.</p>
+                <button type="button" class="btn btn-danger" hx-get="{% url 'webui:scan_reset' %}" hx-target="#modal-body">{% icon "trash" 16 %} Reset all data…</button></div>
+        </div>
     </div>
     {% endif %}
+    </div>
 </div>
 {% endblock %}

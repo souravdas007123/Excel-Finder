@@ -21,9 +21,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 TOKEN_VERSION = 1
-TYPES = ("trial", "monthly", "yearly", "lifetime")
-PENDING = "pending"        # account ban gaya, seller ne abhi plan nahi diya (token tab tak nahi milta)
-TYPE_LABELS = {"trial": "Free trial", "monthly": "Monthly plan", "yearly": "Yearly plan", "lifetime": "Lifetime plan"}
+TYPES = ("monthly", "yearly", "lifetime")
+PENDING = "pending"        # customer ne request ki hai, seller ne abhi key nahi banayi (token tab tak nahi milta)
+TYPE_LABELS = {"monthly": "Monthly plan", "yearly": "Yearly plan", "lifetime": "Lifetime plan"}
 
 KEY_PREFIX = "EXFN"
 _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"    # 0/O aur 1/I nahi: key padhne me galti na ho
@@ -160,8 +160,7 @@ def _fmt_date(dt):
 BLOCK_DEFAULTS = {
     "revoked": "This license has been disabled. Please contact support.",
     "expired": "Your license has expired. Please renew to continue.",
-    "not_activated": "This PC is no longer signed in. Please sign in again.",
-    "pending": "Your account is created and waiting for approval. You will get access as soon as the seller activates your plan.",
+    "not_activated": "This PC is no longer activated for the license. Please enter your license key again.",
 }
 
 
@@ -175,7 +174,7 @@ def evaluate(token, public_b64, machine_id, now=None, max_seen=None, blocked_cod
     if blocked_code:
         return LicenseStatus(blocked_code, False, blocked_message or BLOCK_DEFAULTS.get(blocked_code, "License is blocked."))
     if not token:
-        return LicenseStatus("unlicensed", False, "No license activated yet. Enter your license key or start the free trial.")
+        return LicenseStatus("unlicensed", False, "No license activated yet. Enter the license key the seller sent you.")
     try:
         payload = verify_token(token, public_b64)
     except TokenError:

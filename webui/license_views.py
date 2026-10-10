@@ -1,5 +1,6 @@
-"""License page (account, plan, sign in / create account, key) aur 'naya version' ke buttons. Sab licensing.service se chalta hai."""
+"""License page (plan, key daalna, check, PC badalna) aur 'naya version' ke buttons. Sab licensing.service se chalta hai."""
 from django.conf import settings
+from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
 
@@ -17,8 +18,8 @@ def _panel_context(request):
     status = service.current_status(force=True)
     return {
         "status": status, "state": state, "enforced": service.enforced(),
-        "has_license": bool(state.token or state.license_key), "signed_in": bool(state.device_token),
-        "account_email": state.account_email,
+        "has_license": bool(state.token or state.license_key),
+        "account_email": state.account_email, "account_name": state.account_name,
         "key_hint": ("EXFN-•••••-•••••-•••••-" + state.license_key[-5:]) if state.license_key else "",
         "machine_short": machine_id()[:12], "machine_name": machine_name(),
         "server_url": settings.LICENSE_SERVER_URL, "buy_url": getattr(settings, "LICENSE_BUY_URL", ""),
@@ -40,16 +41,6 @@ def license_page(request):
     return render(request, "webui/license.html", {"active": "license", **_panel_context(request)})
 
 
-@staff_required
-@require_GET
-def license_panel(request):
-    """Plan ke intezaar me panel khud har 30 second dobara aata hai. Plan mil gaya ho toh seedha app khul jata hai."""
-    ctx = _panel_context(request)
-    if request.GET.get("from") == "pending" and ctx["status"].ok:
-        return htmx_redirect("/app/")
-    return render(request, "webui/partials/_license_panel.html", ctx)
-
-
 def _admin_only(view):
     def wrapper(request, *args, **kwargs):
         if not request.user.is_superuser:
@@ -59,12 +50,20 @@ def _admin_only(view):
     return wrapper
 
 
-def _result(request, result):
-    """Action ka natija: panel naya + notification."""
-    response = _panel(request, toast(result.message, "ok" if result.ok else "bad"))
-    if result.ok and service.current_status(force=True).ok and service.enforced():
-        response["HX-Trigger"] = "licenseOk"
-    return response
+def _result(request, result, open_app=False):
+    """Action ka natija: panel naya + notification. Key activate ho gayi ho toh seedha app khul jata hai."""
+    if open_app and result.ok and service.current_status(force=True).ok:
+        response = htmx_redirect("/app/")
+        response["HX-Trigger"] = '{"toast": {"message": "%s", "kind": "ok"}}' % result.message.replace('"', "'")
+        return response
+    return _panel(request, toast(result.message, "ok" if result.ok else "bad"))
+
+
+@staff_required
+@require_POST
+@_admin_only
+def license_activate(request):
+    return _result(request, service.activate(request.POST.get("key", "")), open_app=True)
 
 
 @staff_required
@@ -77,31 +76,7 @@ def license_check(request):
 @staff_required
 @require_POST
 @_admin_only
-def license_login(request):
-    return _result(request, service.login(request.POST.get("email", ""), request.POST.get("password", "")))
-
-
-@staff_required
-@require_POST
-@_admin_only
-def license_register(request):
-    if request.POST.get("password", "") != request.POST.get("confirm", ""):
-        return message_only("The two passwords do not match.", "bad")
-    return _result(request, service.register(request.POST.get("name", ""), request.POST.get("email", ""),
-                                             request.POST.get("password", "")))
-
-
-@staff_required
-@require_POST
-@_admin_only
-def license_activate(request):
-    return _result(request, service.activate(request.POST.get("key", "")))
-
-
-@staff_required
-@require_POST
-@_admin_only
-def license_signout(request):
+def license_deactivate(request):
     return _result(request, service.deactivate())
 
 
@@ -127,3 +102,17 @@ def update_check_now(request):
 def update_dismiss(request):
     update_check.dismiss(request.POST.get("version", ""))
     return _banner(request)
+
+
+@staff_required
+@require_POST
+def update_install(request):
+    """'Update now': naya Setup.exe download + jaanch + install (search/update_check.py)."""
+    result = update_check.start_install()
+    return JsonResponse({"ok": result.ok, "message": result.message})
+
+
+@staff_required
+@require_GET
+def update_status(request):
+    return JsonResponse(update_check.install_status())

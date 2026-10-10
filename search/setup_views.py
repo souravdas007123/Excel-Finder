@@ -1,7 +1,7 @@
 """Pehli baar chalane par account banane ka page (installed app ke liye: customer ko 'createsuperuser' nahi karna padta).
 
-Licensed (bechne wali) app me ye page customer ka ACCOUNT banata hai (naam + email + password): server par account banta
-hai (seller ke admin panel me dikhta hai) aur isi email / password se is PC ka login bhi ban jata hai. Seller plan deta hai.
+Licensed (bechne wali) app me ye page customer se naam + email + password leta hai. Naam + email seller ke server par
+jata hai (admin panel me 'Waiting for key' ki row), password SIRF is PC par rehta hai (isse app khulta hai). Key seller email karta hai.
 Development copy (license check band) me purana simple form: username + password.
 """
 from django.contrib.auth import get_user_model, login, password_validation
@@ -40,7 +40,6 @@ def _legacy(request, User):
 
 def _account(request, User):
     posted = request.method == "POST"
-    mode = "signin" if (request.POST.get("mode") if posted else request.GET.get("mode")) == "signin" else "register"
     errors = []
     form = {"name": request.POST.get("name", "").strip(), "email": request.POST.get("email", "").strip().lower()} if posted else {}
     if posted:
@@ -49,23 +48,21 @@ def _account(request, User):
             validate_email(form["email"])
         except ValidationError:
             errors.append("Please enter a valid email address.")
-        if mode == "register":
-            if not form["name"]:
-                errors.append("Please enter your name.")
-            if password != confirm:
-                errors.append("The two passwords do not match.")
-            if not errors:
-                try:
-                    password_validation.validate_password(password, User(username=form["email"]))
-                except ValidationError as exc:
-                    errors.extend(exc.messages)
+        if not form["name"]:
+            errors.append("Please enter your name.")
+        if password != confirm:
+            errors.append("The two passwords do not match.")
         if not errors:
-            result = (service.register(form["name"], form["email"], password) if mode == "register"
-                      else service.login(form["email"], password))
+            try:
+                password_validation.validate_password(password, User(username=form["email"]))
+            except ValidationError as exc:
+                errors.extend(exc.messages)
+        if not errors:
+            result = service.register(form["name"], form["email"])       # password server ko nahi jata
             if result.ok:
                 return _finish(request, User, form["email"][:150], form["email"], password)
             errors.append(result.message)
-    return render(request, "setup.html", {"errors": errors, "form": form, "mode": mode, "account_mode": True})
+    return render(request, "setup.html", {"errors": errors, "form": form, "account_mode": True})
 
 
 @require_http_methods(["GET", "POST"])

@@ -15,6 +15,7 @@ if not apps.is_installed("license_server"):
     raise unittest.SkipTest("License server tests: --settings=license_server.server_settings ke saath chalao")
 
 import json
+import re
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -239,30 +240,6 @@ class RenewalTests(ServerTestCase):
             core.get_license("zzzzz")
 
 
-class TrialTests(ServerTestCase):
-    def test_trial_starts_without_a_key(self):
-        r = self.call("trial", machine_id=PC1, machine_name="HOME", app_version="1.0")
-        self.assertEqual(r.status_code, 200)
-        status = self.status_of(r)
-        self.assertEqual((status.ok, status.license_type), (True, "trial"))
-        self.assertIn(status.days_left, (13, 14))
-
-    def test_one_trial_per_pc(self):
-        self.call("trial", machine_id=PC1)
-        self.call("trial", machine_id=PC1)
-        self.assertEqual(License.objects.filter(license_type="trial").count(), 1)
-        self.call("trial", machine_id=PC2)
-        self.assertEqual(License.objects.filter(license_type="trial").count(), 2)
-
-    def test_trial_cannot_be_restarted_after_it_ends(self):
-        self.call("trial", machine_id=PC1)
-        License.objects.filter(license_type="trial").update(expires_at=timezone.now() - timedelta(days=1))
-        r = self.call("trial", machine_id=PC1)
-        self.assertEqual((r.status_code, r.json()["error"]), (403, "expired"))
-        self.assertIn("trial has ended", r.json()["message"])
-        self.assertEqual(License.objects.filter(license_type="trial").count(), 1)
-
-
 class RateLimitTests(ServerTestCase):
     @override_settings(RATE_LIMIT_PER_MINUTE=3)
     def test_too_many_requests_are_blocked(self):
@@ -319,13 +296,13 @@ class AdminTests(ServerTestCase):
         self.activate(key)
         lic.refresh_from_db()
         before = lic.expires_at
-        self.run_action("extend_one_year", lic)
+        self.run_action("add_365_days", lic)
         lic.refresh_from_db()
         self.assertEqual((lic.expires_at - before).days, 365)
 
-    def test_new_key_action_shows_the_new_key(self):
+    def test_generate_key_action_shows_a_new_key_and_the_old_one_stops(self):
         lic, old = self.make()
-        r = self.run_action("issue_new_key", lic)
+        r = self.run_action("key_yearly", lic)
         text = r.content.decode()
         new = protocol.normalize_key(text[text.index("EXFN-"):][:29])
         self.assertTrue(new)
@@ -377,241 +354,272 @@ class CommandTests(ServerTestCase):
         self.assertEqual(protocol.verify_token(token, public)["x"], 1)
 
 
-# ------------------------------------------------------------------ accounts (email + password) aur seller ka plan dena
-class AccountTests(ServerTestCase):
-    EMAIL, PASSWORD = "ravi@example.com", "Str0ng-Pass-77"
-
-    def register(self, machine=PC1, **kw):
-        data = dict(name="Ravi", email=self.EMAIL, password=self.PASSWORD, machine_id=machine, machine_name="OFFICE-PC")
+# ------------------------------------------------------------------ customer ki request, key, reset code, usage
+class RequestTests(ServerTestCase):
+    def register(self, **kw):
+        data = dict(name="Ravi Kumar", email="Ravi@Example.com", machine_id=PC1)
         data.update(kw)
         return self.call("register", **data)
 
-    def login(self, machine=PC1, **kw):
-        data = dict(email=self.EMAIL, password=self.PASSWORD, machine_id=machine, machine_name="OFFICE-PC")
-        data.update(kw)
-        return self.call("login", **data)
-
-    def check(self, device_token, machine=PC1, email=None):
-        return self.call("account_check", email=email or self.EMAIL, device_token=device_token, machine_id=machine)
-
-    def account(self):
-        return License.objects.get(customer_email=self.EMAIL)
-
-    def approved(self, plan="monthly"):
-        data = self.register().json()
-        core.set_plan(self.account(), plan)
-        return data["device_token"]
-
-    # --- sign up
-    def test_signup_creates_a_pending_account_without_access(self):
+    def test_request_makes_a_waiting_for_key_row(self):
         r = self.register()
-        self.assertEqual(r.status_code, 200)
-        data = r.json()
-        self.assertTrue(data["ok"] and data["pending"])
-        self.assertNotIn("token", data)                      # plan nahi mila: signed token nahi
-        self.assertTrue(data["device_token"])
-        account = self.account()
-        self.assertEqual((account.license_type, account.state()), ("pending", "pending"))
-        self.assertNotIn(self.PASSWORD, account.password_hash)    # password hashed hai, seedha nahi rakha
-        self.assertTrue(account.password_hash.startswith("md5$"))      # (tests me tez hasher; asli server par pbkdf2)
+        self.assertEqual((r.status_code, r.json()["ok"]), (200, True))
+        lic = License.objects.get()
+        self.assertEqual((lic.customer_name, lic.customer_email, lic.license_type, lic.state()),
+                         ("Ravi Kumar", "ravi@example.com", "pending", "pending"))
+        self.assertEqual(lic.activations.count(), 0)
 
-    def test_email_is_case_insensitive_and_unique(self):
-        self.register(email="Ravi@Example.com")
-        r = self.register(email="ravi@example.COM", machine=PC2)
-        self.assertEqual((r.status_code, r.json()["error"]), (409, "email_exists"))
-        self.assertEqual(License.objects.filter(password_hash__gt="").count(), 1)
+    def test_asking_again_does_not_make_a_second_row(self):
+        self.register()
+        self.register(email="ravi@example.COM", machine_id=PC2, name="Someone else")
+        self.assertEqual(License.objects.count(), 1)
+        self.assertEqual(License.objects.get().customer_name, "Ravi Kumar")        # purani row nahi badalti
 
-    def test_bad_email_and_weak_password_are_refused(self):
+    def test_bad_name_and_email_are_refused(self):
         self.assertEqual(self.register(email="not-an-email").json()["error"], "bad_email")
-        for weak in ("short", "password", "12345678"):
-            r = self.register(password=weak)
-            self.assertEqual((r.status_code, r.json()["error"]), (400, "weak_password"), weak)
-        self.assertFalse(License.objects.filter(password_hash__gt="").exists())
+        self.assertEqual(self.register(name="  ").json()["error"], "bad_name")
+        self.assertEqual(self.register(name=None).json()["error"], "bad_name")
+        self.assertFalse(License.objects.exists())
 
-    def test_pending_account_check_stays_pending_until_seller_acts(self):
-        token = self.register().json()["device_token"]
-        data = self.check(token).json()
-        self.assertTrue(data["ok"] and data["pending"])
-        self.assertNotIn("token", data)
+    def test_no_password_is_involved(self):
+        self.register(password="should-be-ignored")
+        self.assertFalse(hasattr(License.objects.get(), "password_hash"))
 
-    # --- seller plan deta hai
-    def test_seller_gives_monthly_and_the_app_gets_a_30_day_token(self):
-        token = self.approved("monthly")
-        data = self.check(token).json()
-        self.assertTrue(data["ok"])
-        status = protocol.evaluate(data["token"], PUBLIC, PC1)
+    def test_the_hidden_key_of_a_request_cannot_be_used(self):
+        self.register()
+        r = self.activate("EXFN-AAAAA-AAAAA-AAAAA-AAAAA")
+        self.assertEqual(r.status_code, 404)
+
+
+class KeyFlowTests(ServerTestCase):
+    """Customer ne request ki -> seller ne 'Generate key' kiya -> customer ne key daali -> 1 PC par chalu."""
+
+    def setUp(self):
+        super().setUp()
+        self.call("register", name="Ravi", email="ravi@example.com", machine_id=PC1)
+        self.lic = License.objects.get()
+
+    def test_monthly_key_works_for_30_days_from_first_use(self):
+        key = core.issue_key(self.lic, "monthly")
+        status = self.status_of(self.activate(key))
         self.assertEqual((status.ok, status.license_type), (True, "monthly"))
         self.assertAlmostEqual(status.days_left, 30, delta=1)
 
-    def test_yearly_and_lifetime_plans(self):
-        token = self.approved("yearly")
-        self.assertAlmostEqual(protocol.evaluate(self.check(token).json()["token"], PUBLIC, PC1).days_left, 365, delta=1)
-        core.set_plan(self.account(), "lifetime")
-        status = protocol.evaluate(self.check(token).json()["token"], PUBLIC, PC1)
+    def test_yearly_and_lifetime_keys(self):
+        status = self.status_of(self.activate(core.issue_key(self.lic, "yearly")))
+        self.assertAlmostEqual(status.days_left, 365, delta=1)
+        lic = License.objects.get()
+        core.release_pcs(lic)
+        status = self.status_of(self.activate(core.issue_key(lic, "lifetime"), machine=PC2), machine=PC2)
         self.assertEqual((status.license_type, status.expires), ("lifetime", None))
 
-    def test_renewing_adds_to_the_remaining_time(self):
-        self.approved("monthly")
-        account = self.account()
-        first_end = account.expires_at
-        core.set_plan(account, "monthly")
-        self.assertAlmostEqual((self.account().expires_at - first_end).days, 30, delta=1)
+    def test_the_clock_starts_at_first_use_not_when_the_key_is_made(self):
+        core.issue_key(self.lic, "monthly")
+        self.lic.refresh_from_db()
+        self.assertIsNone(self.lic.expires_at)
+        self.assertEqual(self.lic.state(), "unused")
 
-    def test_changing_plan_starts_the_new_plan_from_today(self):
-        self.approved("yearly")
-        core.set_plan(self.account(), "monthly")
-        self.assertAlmostEqual((self.account().expires_at - timezone.now()).days, 30, delta=1)
-
-    def test_expired_monthly_account_is_refused_then_works_after_renewal(self):
-        token = self.approved("monthly")
-        License.objects.filter(pk=self.account().pk).update(expires_at=timezone.now() - timedelta(days=1))
-        r = self.check(token)
-        self.assertEqual((r.status_code, r.json()["error"]), (403, "expired"))
-        core.set_plan(self.account(), "monthly")
-        self.assertTrue(self.check(token).json()["ok"])
-
-    def test_block_stops_the_account_and_a_plan_does_not_unblock_it(self):
-        token = self.approved("yearly")
-        License.objects.filter(pk=self.account().pk).update(revoked=True, revoked_reason="Chargeback")
-        self.assertEqual(self.check(token).json()["error"], "revoked")
-        core.set_plan(self.account(), "yearly")
-        self.assertEqual(self.check(token).json()["error"], "revoked")
-        self.assertEqual(self.login().json()["error"], "revoked")
-
-    # --- login
-    def test_login_on_the_same_pc_works_after_approval(self):
-        self.approved("yearly")
-        data = self.login().json()
-        self.assertTrue(data["ok"] and data["token"] and data["device_token"])
-        self.assertEqual(data["account"]["email"], self.EMAIL)
-
-    def test_wrong_password_and_unknown_email_look_the_same(self):
-        self.register()
-        a = self.login(password="wrong-password-1")
-        b = self.login(email="nobody@example.com")
-        self.assertEqual((a.status_code, a.json()["error"]), (401, "bad_login"))
-        self.assertEqual((b.status_code, b.json()["error"], b.json()["message"]), (401, "bad_login", a.json()["message"]))
-
-    def test_too_many_wrong_passwords_lock_the_account_for_a_while(self):
-        self.register()
-        for _ in range(core.LOGIN_FAIL_LIMIT):
-            self.assertEqual(self.login(password="wrong-password-1").json()["error"], "bad_login")
-        r = self.login()                                    # sahi password bhi ab nahi chalega
-        self.assertEqual((r.status_code, r.json()["error"]), (429, "too_many_attempts"))
-        cache.clear()
-        self.assertTrue(self.login().json()["ok"])
-
-    # --- PC limit aur device secret
-    def test_second_pc_is_refused_until_the_first_signs_out(self):
-        token = self.approved("yearly")
-        r = self.login(machine=PC2)
+    def test_key_works_on_one_pc_only_until_the_pc_is_freed(self):
+        key = core.issue_key(self.lic, "yearly")
+        self.assertEqual(self.activate(key).status_code, 200)
+        r = self.activate(key, machine=PC2)
         self.assertEqual((r.status_code, r.json()["error"]), (409, "machine_limit"))
-        self.assertTrue(self.call("logout", email=self.EMAIL, device_token=token, machine_id=PC1).json()["deactivated"])
-        self.assertTrue(self.login(machine=PC2).json()["ok"])
-        self.assertEqual(self.check(token).json()["error"], "not_activated")      # purana PC ab band
+        self.assertEqual(core.release_pcs(self.lic), 1)
+        self.assertEqual(self.activate(key, machine=PC2).status_code, 200)
+        self.assertEqual(self.call("check", key=key, machine_id=PC1).json()["error"], "not_activated")
 
-    def test_seller_can_allow_two_pcs(self):
-        self.approved("yearly")
-        License.objects.filter(pk=self.account().pk).update(max_machines=2)
-        self.assertTrue(self.login(machine=PC2).json()["ok"])
+    def test_new_key_for_the_same_customer_replaces_the_old_one(self):
+        old = core.issue_key(self.lic, "monthly")
+        new = core.issue_key(self.lic, "yearly")
+        self.assertEqual(self.activate(old).status_code, 404)
+        self.assertEqual(self.activate(new).status_code, 200)
 
-    def test_device_secret_is_required_and_pc_specific(self):
-        token = self.approved("yearly")
-        self.assertEqual(self.check("wrong-secret").json()["error"], "not_activated")
-        self.assertEqual(self.check("").json()["error"], "not_activated")
-        self.assertEqual(self.check(token, machine=PC2).json()["error"], "not_activated")
-        self.assertEqual(self.check(token, email="other@example.com").json()["error"], "not_activated")
-        self.assertTrue(self.check(token).json()["ok"])
+    def test_cancel_blocks_at_the_next_check_and_unblock_restores(self):
+        key = core.issue_key(self.lic, "yearly")
+        self.activate(key)
+        License.objects.filter(pk=self.lic.pk).update(revoked=True, revoked_reason="Refund")
+        r = self.call("check", key=key, machine_id=PC1)
+        self.assertEqual((r.status_code, r.json()["error"], r.json()["message"]), (403, "revoked", "Refund"))
+        License.objects.filter(pk=self.lic.pk).update(revoked=False)
+        self.assertEqual(self.call("check", key=key, machine_id=PC1).status_code, 200)
 
-    def test_logout_with_a_wrong_secret_does_nothing(self):
-        token = self.approved("yearly")
-        self.assertFalse(self.call("logout", email=self.EMAIL, device_token="nope", machine_id=PC1).json()["deactivated"])
-        self.assertTrue(self.check(token).json()["ok"])
+    def test_renewing_after_expiry(self):
+        key = core.issue_key(self.lic, "monthly")
+        self.activate(key)
+        License.objects.filter(pk=self.lic.pk).update(expires_at=timezone.now() - timedelta(days=1))
+        self.assertEqual(self.call("check", key=key, machine_id=PC1).json()["error"], "expired")
+        core.extend(License.objects.get(pk=self.lic.pk), 30)
+        self.assertEqual(self.call("check", key=key, machine_id=PC1).status_code, 200)
 
-    def test_token_from_one_pc_does_not_work_on_another(self):
-        token = self.approved("yearly")
-        data = self.check(token).json()
-        self.assertEqual(protocol.evaluate(data["token"], PUBLIC, PC2).code, "wrong_machine")
+    def test_issue_key_rejects_unknown_plans(self):
+        with self.assertRaises(ValueError):
+            core.issue_key(self.lic, "trial")
 
-    def test_license_keys_still_work_next_to_accounts(self):
+
+class UsageTests(ServerTestCase):
+    def test_files_indexed_is_the_latest_count_and_the_other_counters_only_grow(self):
         lic, key = self.make()
-        self.assertTrue(self.activate(key).json()["ok"])
+        self.activate(key, usage={"files_indexed": 120, "searches_total": 5, "scans_total": 2})
+        self.call("check", key=key, machine_id=PC1, usage={"files_indexed": 90, "searches_total": 3, "scans_total": 1})
+        a = lic.activations.get()
+        self.assertEqual((a.files_indexed, a.searches_total, a.scans_total), (90, 5, 2))     # index saaf ho toh files ghat sakti hain
+
+    def test_bad_files_indexed_is_ignored(self):
+        lic, key = self.make()
+        self.activate(key, usage={"files_indexed": 50})
+        self.call("check", key=key, machine_id=PC1, usage={"files_indexed": "many"})
+        self.assertEqual(lic.activations.get().files_indexed, 50)               # samajh na aaye toh purani ginti rehti hai
+        self.call("check", key=key, machine_id=PC1, usage={"files_indexed": -5})
+        self.assertEqual(lic.activations.get().files_indexed, 0)                 # negative = 0
 
 
-class AccountAdminTests(ServerTestCase):
+class ResetCodeTests(ServerTestCase):
     def setUp(self):
         super().setUp()
-        self.admin = get_user_model().objects.create_superuser("boss", "b@example.com", "pw")
+        self.lic, _key = self.make(customer_email="ravi@example.com")
+
+    def reset(self, code, email="ravi@example.com"):
+        return self.call("reset", email=email, code=code)
+
+    def test_code_works_once(self):
+        code = core.make_reset_code(self.lic)
+        self.assertRegex(code, r"^[A-Z2-9]{4}-[A-Z2-9]{4}$")
+        self.assertTrue(self.reset(code).json()["ok"])
+        r = self.reset(code)
+        self.assertEqual((r.status_code, r.json()["error"]), (403, "bad_code"))
+
+    def test_code_is_forgiving_about_case_and_dashes(self):
+        code = core.make_reset_code(self.lic)
+        self.assertTrue(self.reset(" " + code.lower().replace("-", " ") + " ").json()["ok"])
+
+    def test_code_expires_after_24_hours(self):
+        code = core.make_reset_code(self.lic)
+        License.objects.filter(pk=self.lic.pk).update(reset_expires=timezone.now() - timedelta(minutes=1))
+        self.assertEqual(self.reset(code).json()["error"], "bad_code")
+
+    def test_wrong_code_wrong_email_and_no_code(self):
+        code = core.make_reset_code(self.lic)
+        for bad in ("AAAA-AAAA", "", "x"):
+            self.assertEqual(self.reset(bad).json()["error"], "bad_code")
+        self.assertEqual(self.reset(code, email="other@example.com").json()["error"], "bad_code")
+        self.assertEqual(self.call("reset", email="not-an-email", code=code).json()["error"], "bad_email")
+        self.assertTrue(self.reset(code).json()["ok"])                       # galat koshishon se asli code kharab nahi hua
+
+    def test_nothing_issued_means_nothing_works(self):
+        self.assertEqual(self.reset("AAAA-AAAA").json()["error"], "bad_code")
+
+    def test_guessing_is_locked_out(self):
+        code = core.make_reset_code(self.lic)
+        for _ in range(core.RESET_FAIL_LIMIT):
+            self.assertEqual(self.reset("AAAA-AAAA").json()["error"], "bad_code")
+        r = self.reset(code)                                                  # sahi code bhi ab nahi chalega
+        self.assertEqual((r.status_code, r.json()["error"]), (429, "too_many_attempts"))
+        cache.clear()
+        self.assertTrue(self.reset(code).json()["ok"])
+
+    def test_a_new_code_replaces_the_old_one(self):
+        old = core.make_reset_code(self.lic)
+        new = core.make_reset_code(self.lic)
+        self.assertEqual(self.reset(old).json()["error"], "bad_code")
+        self.assertTrue(self.reset(new).json()["ok"])
+
+    def test_the_code_is_stored_hashed(self):
+        code = core.make_reset_code(self.lic)
+        self.lic.refresh_from_db()
+        self.assertNotIn(code.replace("-", ""), self.lic.reset_code_hash)
+        self.assertEqual(len(self.lic.reset_code_hash), 64)
+
+
+class CustomerAdminTests(ServerTestCase):
+    """Seller ka 'Customers' page: kaun, kaun sa plan, kitni files, key banana, cancel, PC, reset code."""
+
+    def setUp(self):
+        super().setUp()
+        self.admin = get_user_model().objects.create_superuser("boss", "b@example.com", "pw-12345")
         self.client.force_login(self.admin)
-        self.call("register", name="Ravi", email="ravi@example.com", password="Str0ng-Pass-77", machine_id=PC1)
-        self.account = License.objects.get(customer_email="ravi@example.com")
-        self.url = reverse("admin:license_server_account_changelist")
+        self.call("register", name="Ravi Kumar", email="ravi@example.com", machine_id=PC1)
+        self.lic = License.objects.get()
+        self.url = reverse("admin:license_server_license_changelist")
 
-    def act(self, action):
-        return self.client.post(self.url, {"action": action, "_selected_action": [str(self.account.pk)]}, follow=True)
+    def act(self, action, lic=None):
+        return self.client.post(self.url, {"action": action, "_selected_action": [str((lic or self.lic).pk)]}, follow=True)
 
-    def test_accounts_list_shows_who_is_waiting(self):
+    def key_in(self, response):
+        text = response.content.decode()
+        return protocol.normalize_key(text[text.index("EXFN-"):][:29])
+
+    def test_list_shows_the_customer_waiting_for_a_key(self):
         r = self.client.get(self.url)
-        self.assertContains(r, "ravi@example.com")
-        self.assertContains(r, "Waiting for approval")
+        for text in ("Ravi Kumar", "ravi@example.com", "Waiting for key", "Files indexed"):
+            self.assertContains(r, text)
 
-    def test_accounts_and_keys_are_in_separate_lists(self):
-        self.make()
-        self.assertNotContains(self.client.get(reverse("admin:license_server_license_changelist")), "ravi@example.com")
-        self.assertNotContains(self.client.get(self.url), "Ravi Traders")
+    def test_generate_key_actions_set_the_plan_and_show_a_working_key_once(self):
+        for action, plan in (("key_monthly", "monthly"), ("key_yearly", "yearly"), ("key_lifetime", "lifetime")):
+            r = self.act(action)
+            key = self.key_in(r)
+            self.assertContains(r, "ravi@example.com")
+            self.assertContains(r, "will NOT be shown again")
+            self.assertEqual(self.status_of(self.activate(key, machine=PC1)).license_type, plan)
+            core.release_pcs(self.lic)
+        self.assertNotContains(self.client.get(self.url), key)                  # key dobara nahi dikhti
 
-    def test_give_monthly_yearly_lifetime_actions(self):
-        self.act("give_monthly")
-        self.account.refresh_from_db()
-        self.assertEqual(self.account.license_type, "monthly")
-        self.assertAlmostEqual((self.account.expires_at - timezone.now()).days, 30, delta=1)
-        self.act("give_yearly")
-        self.account.refresh_from_db()
-        self.assertEqual(self.account.license_type, "yearly")
-        self.assertAlmostEqual((self.account.expires_at - timezone.now()).days, 365, delta=1)
-        self.act("give_lifetime")
-        self.account.refresh_from_db()
-        self.assertEqual((self.account.license_type, self.account.expires_at), ("lifetime", None))
+    def test_list_shows_plan_pcs_files_and_usage_after_activation(self):
+        key = self.key_in(self.act("key_yearly"))
+        self.activate(key, usage={"files_indexed": 4321, "searches_total": 17, "scans_total": 3})
+        r = self.client.get(self.url)
+        self.assertContains(r, "Yearly")
+        self.assertContains(r, "1/1")
+        self.assertContains(r, "4321")
+        self.assertContains(r, ">17<")
 
-    def test_changing_the_plan_in_the_list_sets_the_dates(self):
-        prefix = "form-0-"
-        r = self.client.post(self.url, {
-            "form-TOTAL_FORMS": "1", "form-INITIAL_FORMS": "1", "form-MIN_NUM_FORMS": "0", "form-MAX_NUM_FORMS": "1000",
-            prefix + "id": str(self.account.pk), prefix + "license_type": "yearly", "_save": "Save"}, follow=True)
-        self.assertEqual(r.status_code, 200)
-        self.account.refresh_from_db()
-        self.assertEqual(self.account.license_type, "yearly")
-        self.assertAlmostEqual((self.account.expires_at - timezone.now()).days, 365, delta=1)
-
-    def test_block_and_unblock(self):
+    def test_cancel_and_restore(self):
+        key = self.key_in(self.act("key_yearly"))
+        self.activate(key)
         self.act("revoke_selected")
-        self.account.refresh_from_db()
-        self.assertTrue(self.account.revoked)
+        self.assertEqual(self.call("check", key=key, machine_id=PC1).json()["error"], "revoked")
         self.act("unrevoke_selected")
-        self.account.refresh_from_db()
-        self.assertFalse(self.account.revoked)
+        self.assertEqual(self.call("check", key=key, machine_id=PC1).status_code, 200)
 
-    def test_reset_password_shows_a_new_one_once_and_it_works(self):
-        r = self.act("reset_password")
-        self.assertContains(r, "New password for ravi@example.com")
-        self.account.refresh_from_db()
-        self.assertFalse(core.check_password("Str0ng-Pass-77", self.account.password_hash))
-        import re
-        new_password = re.search(r"<code[^>]*>([^<]+)</code>", r.content.decode()).group(1)
-        self.assertTrue(self.call("login", email="ravi@example.com", password=new_password, machine_id=PC1).json()["pending"])
+    def test_renew_actions(self):
+        key = self.key_in(self.act("key_monthly"))
+        self.activate(key)
+        self.lic.refresh_from_db()
+        before = self.lic.expires_at
+        self.act("add_30_days")
+        self.act("add_365_days")
+        self.lic.refresh_from_db()
+        self.assertEqual((self.lic.expires_at - before).days, 395)
 
-    def test_reset_password_clears_a_lockout(self):
-        for _ in range(core.LOGIN_FAIL_LIMIT):
-            self.call("login", email="ravi@example.com", password="wrong-password-1", machine_id=PC1)
-        new_password = core.set_password(self.account)
-        self.assertTrue(self.call("login", email="ravi@example.com", password=new_password, machine_id=PC1).json()["ok"])
+    def test_free_the_pc(self):
+        key = self.key_in(self.act("key_yearly"))
+        self.activate(key)
+        self.assertEqual(self.activate(key, machine=PC2).status_code, 409)
+        self.act("free_the_pc")
+        self.assertEqual(self.activate(key, machine=PC2).status_code, 200)
 
-    def test_admin_cannot_add_accounts_by_hand(self):
-        self.assertEqual(self.client.get(reverse("admin:license_server_account_add")).status_code, 403)
+    def test_reset_code_action_shows_a_code_that_works(self):
+        r = self.act("reset_code")
+        match = re.search(r"<code[^>]*>([A-Z2-9]{4}-[A-Z2-9]{4})</code>", r.content.decode())
+        self.assertTrue(match)
+        self.assertContains(r, "ravi@example.com")
+        self.assertTrue(self.call("reset", email="ravi@example.com", code=match.group(1)).json()["ok"])
 
-    def test_account_page_opens(self):
-        r = self.client.get(reverse("admin:license_server_account_change", args=[self.account.pk]))
-        self.assertEqual(r.status_code, 200)
+    def test_one_action_for_several_customers_gives_each_their_own_key(self):
+        self.call("register", name="Amit", email="amit@example.com", machine_id=PC2)
+        both = License.objects.all()
+        r = self.client.post(self.url, {"action": "key_monthly", "_selected_action": [str(x.pk) for x in both]}, follow=True)
+        self.assertContains(r, "Ravi Kumar")
+        self.assertContains(r, "Amit")
+        self.assertEqual(sorted(License.objects.values_list("license_type", flat=True)), ["monthly", "monthly"])
+
+    def test_add_form_and_detail_pages_open(self):
+        self.assertEqual(self.client.get(reverse("admin:license_server_license_change", args=[self.lic.pk])).status_code, 200)
+        self.assertEqual(self.client.get(reverse("admin:license_server_license_add")).status_code, 200)
+
+    def test_pages_need_a_login(self):
+        self.client.logout()
+        self.assertEqual(self.client.get(self.url).status_code, 302)
+
 
 
 # ------------------------------------------------------------------ app updates (seller 'App releases' me version daalta hai)
@@ -666,3 +674,33 @@ class ReleaseTests(ServerTestCase):
             codes = [self.latest().status_code for _ in range(4)]
         self.assertEqual(codes[:2], [200, 200])
         self.assertEqual(codes[-1], 429)
+
+
+class EnvFileTests(ServerTestCase):
+    """`server.env`: hosting par secret settings ek file me (PythonAnywhere)."""
+
+    def load(self, text, **env):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from . import server_settings
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "server.env"
+            path.write_text(text, encoding="utf-8")
+            with mock.patch.dict(os.environ, env, clear=False):
+                for name in ("EF_TEST_A", "EF_TEST_B", "EF_TEST_C", "EF_TEST_D"):
+                    os.environ.pop(name, None) if name not in env else None
+                server_settings.load_env_file(path)
+                return {name: os.environ.get(name) for name in ("EF_TEST_A", "EF_TEST_B", "EF_TEST_C", "EF_TEST_D")}
+
+    def test_reads_plain_quoted_and_commented_lines(self):
+        got = self.load("# comment\n\nEF_TEST_A=one\nEF_TEST_B = 'two words'\nEF_TEST_C=\"three\"\nnot a line\nEF_TEST_D=a=b=c\n")
+        self.assertEqual(got, {"EF_TEST_A": "one", "EF_TEST_B": "two words", "EF_TEST_C": "three", "EF_TEST_D": "a=b=c"})
+
+    def test_a_real_environment_variable_wins(self):
+        self.assertEqual(self.load("EF_TEST_A=from-file", EF_TEST_A="from-env")["EF_TEST_A"], "from-env")
+
+    def test_a_missing_file_is_fine(self):
+        from . import server_settings
+        server_settings.load_env_file("/no/such/server.env")

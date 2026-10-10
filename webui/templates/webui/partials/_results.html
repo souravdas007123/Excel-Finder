@@ -19,7 +19,7 @@
         </div>
         <div class="row">
             {% if s.not_found %}<button type="button" class="btn btn-sm" data-copy-from="#missing-text" title="Copy the numbers that were not found">{% icon "copy" 14 %} Copy not-found</button>{% endif %}
-            <button type="submit" class="btn btn-primary btn-sm" form="search-form" formaction="/admin/export-excel-api/" formmethod="post">{% icon "download" 14 %} Export Excel report</button>
+            <button type="submit" class="btn btn-primary btn-sm" form="search-form" formaction="{% url 'webui:search_export' %}" formmethod="post">{% icon "download" 14 %} Export Excel report</button>
         </div>
     </div>
     <textarea id="missing-text" hidden>{{ missing_text }}</textarea>

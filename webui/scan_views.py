@@ -3,7 +3,7 @@ from django.http import HttpResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from fileindex import views as core
+from fileindex import services as core
 from fileindex.drives import get_scan_locations
 from fileindex.models import FileIndex, ScanTask
 from fileindex.scanner import cancel_event, scan_lock
@@ -38,6 +38,7 @@ def scan_page(request):
         "running": running,
         "last": last,
         "files": FileIndex.objects.count(),
+        "has_data": FileIndex.objects.exists() or ScanTask.objects.exists(),
         "numbers": numbers_count() if FileIndex.objects.exists() else 0,
         **_freshness(),
     })
@@ -103,3 +104,26 @@ def scan_clear(request):
     response["HX-Trigger"] = '{"indexChanged": true, "closeModal": true, "toast": {"message": "Index cleared (%d files removed). Your Excel files were not touched.", "kind": "ok"}}' % removed
     return response
 
+
+
+RESET_WORD = "RESET"
+
+
+@staff_required
+@require_http_methods(["GET", "POST"])
+def scan_reset(request):
+    """Poora data reset: index + scan history + browser me yaad rakhi recent searches. Login aur license waise hi rehte hain."""
+    if not request.user.has_perm("fileindex.delete_fileindex"):
+        return message_only("You do not have permission to reset the data.", "bad")
+    if request.method == "GET":
+        return render(request, "webui/partials/_reset_confirm.html", {
+            "files": FileIndex.objects.count(), "scans": ScanTask.objects.count(), "word": RESET_WORD})
+    if request.POST.get("confirm", "").strip().upper() != RESET_WORD:
+        return message_only("Type RESET to confirm.", "warn")
+    removed, error, _status = core.clear_index(request.user, history=True)
+    if error:
+        return message_only(error, "bad")
+    response = HttpResponse(status=204)
+    response["HX-Trigger"] = ('{"indexChanged": true, "closeModal": true, "resetBrowserData": true, '
+                              '"toast": {"message": "Everything was reset (%d files removed). You can start fresh with a new scan.", "kind": "ok"}}') % removed
+    return response

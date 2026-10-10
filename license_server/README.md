@@ -3,6 +3,8 @@
 Ye chhota Django app customer ki licenses sambhalta hai: key banana, PC par activate, renewal, block. **Ye customer ko mat dena.**
 (Customer wali app me iska sirf address aur PUBLIC key hoti hai.)
 
+> **PythonAnywhere par chalana ho** (sabse aasan, domain nahi chahiye): `license_server/PYTHONANYWHERE.md` dekho.
+
 ## 1. Pehli baar (apne computer par try karo)
 ```bash
 export LICENSE_SERVER_DEBUG=1
@@ -25,6 +27,7 @@ export LICENSE_SERVER_CSRF_ORIGINS=https://license.example.com
 export LICENSE_SERVER_TRUST_PROXY=1                            # nginx ke peeche ho toh (asli IP ke liye)
 export LICENSE_SERVER_DB=/var/lib/license/license.sqlite3     # backup is file ka lo
 # Private key: license_server/private_key.txt (keygen --write) ya LICENSE_PRIVATE_KEY=<key>
+# (Ye sab `license_server/server.env` file me KEY=VALUE likh kar bhi de sakte ho: export ki zarurat nahi)
 
 python manage.py migrate --settings=license_server.server_settings
 python manage.py collectstatic --noinput --settings=license_server.server_settings
@@ -43,13 +46,12 @@ server {
 ```
 **HTTPS zaruri hai** (license key network par jati hai). App http address ko maanti hi nahi (sirf 127.0.0.1 testing ke liye).
 
-## 3a. Customer accounts aur updates (admin panel)
-Admin panel (`/`) me teen hisse hain:
-* **Accounts (customers):** jo customer app me email + password se account banata hai wo yahan "Waiting for approval" dikhta hai. Plan do (Give MONTHLY / YEARLY / LIFETIME), block karo, password reset karo. Customer ka app plan milne ke 5 minute ke andar khud khul jata hai.
+## 3a. Customers, keys aur updates (admin panel)
+Admin panel (`/`) me do hisse hain:
+* **Licenses:** jo customer app me naam + email deta hai wo yahan "Waiting for key" dikhta hai. **Generate key: Monthly / Yearly / Lifetime** se key banao (ek baar dikhti hai, customer ko email karo). Yahin dikhta hai plan, status, expiry, PC (1/1), files indexed, searches. Actions: Renew (+30 / +365 din), CANCEL, Free the PC, Password reset code.
 * **App releases:** naya version (version, Setup.exe ka https link, SHA-256, notes). Customers ke app me "Update now" aata hai. API: `GET /api/v1/latest`.
-* **Licenses:** purane key (`EXFN-...`) wale licenses.
 
-Account ke liye API: `register`, `login`, `account_check`, `logout` (POST `/api/v1/<action>`). Password server par hashed rehta hai, galat password 6 baar ke baad 15 minute ke liye ruk jata hai. App password kabhi save nahi karta: login par server ek PC-specific secret deta hai.
+API (POST `/api/v1/<action>`): `register` (naam + email), `activate`, `check`, `deactivate`, `reset` (email + code). **Password server tak aata hi nahi**: app ka password sirf customer ke PC par rehta hai; reset code ek baar chalne wala hota hai (24 ghante), galat code 6 baar ke baad 15 minute ke liye ruk jata hai. Usage me sirf ginti jati hai (searches, scans, kitni files index me): koi file ka naam ya data nahi.
 
 ## 3. Roz ke kaam
 Admin panel ya commands (dono chalte hain):

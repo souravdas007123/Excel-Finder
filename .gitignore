@@ -16,3 +16,6 @@ excel-finder.log*
 launcher.log
 update_info.json
 website/dist/
+
+# license server ki secret settings (hosting par): git me nahi jati
+license_server/server.env

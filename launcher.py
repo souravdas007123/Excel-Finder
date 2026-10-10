@@ -70,7 +70,7 @@ def already_running(folder):
     """Pichli baar likhe port par hamara app jawab de raha ho toh us ka URL, warna None."""
     try:
         port = int((folder / "port.txt").read_text().strip())
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/admin/login/", timeout=2):   # /setup/ par redirect ho toh bhi 200
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/app/login/", timeout=2):   # /setup/ par redirect ho toh bhi 200
             return f"http://127.0.0.1:{port}/"
     except Exception:
         return None

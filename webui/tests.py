@@ -8,13 +8,12 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
-from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from fileindex import views as core
+from fileindex import services as core
 from fileindex.excel_parser import match_key
 from fileindex.models import FileIndex, NumberIndex, ScanFailure, ScanTask
-from fileindex.scanner import scan_lock
+from fileindex.scanner import scan_lock, scan_progress
 from licensing import protocol, service
 from licensing.models import LicenseState
 from search import middleware as first_run
@@ -24,6 +23,7 @@ from . import helpers, search_views
 from .templatetags import webui_tags
 
 HX = {"HTTP_HX_REQUEST": "true"}
+GOOD_KEY = "EXFN-ABCDE-FGHJK-LMNPQ-RSTUV"
 
 
 def hx(target=None, **extra):
@@ -45,6 +45,9 @@ class UiTestCase(TestCase):
     def setUp(self):
         first_run.reset_first_run_cache()
         cache.clear()
+        if scan_lock.locked():              # kisi purane test ka atka hua lock (warna test hamesha ke liye ruk jata)
+            scan_lock.release()
+        scan_progress.update(run=None, task_id=None, total=None, counted=0)      # purane scan ki ginti
         self.client.force_login(self.admin)
 
     def add_file(self, name="sales.xlsx", folder="/data/Sales", numbers=(), sheet="Sheet1", mtime=1_700_000_000):
@@ -138,7 +141,7 @@ class DashboardTests(UiTestCase):
 
     def test_running_scan_banner(self):
         ScanTask.objects.create(status="Running", files_indexed=7)
-        scan_lock.acquire()
+        self.assertTrue(scan_lock.acquire(blocking=False))
         self.addCleanup(scan_lock.release)
         self.assertContains(self.client.get("/app/"), "A scan is running")
 
@@ -146,10 +149,15 @@ class DashboardTests(UiTestCase):
         ScanTask.objects.create(status="Completed", files_indexed=12)
         self.assertContains(self.client.get("/app/"), "Completed")
 
-    def test_sidebar_has_the_license_chip_and_admin_link(self):
+    def test_sidebar_has_the_license_chip_and_no_admin_link(self):
         r = self.client.get("/app/")
         self.assertContains(r, "Development copy")
-        self.assertContains(r, 'href="/admin/"')
+        self.assertNotContains(r, "/admin/")
+        self.assertNotContains(r, "Manage users")
+
+    def test_the_customer_app_has_no_django_admin(self):
+        for url in ("/admin/", "/admin/login/", "/admin/auth/user/"):
+            self.assertEqual(self.client.get(url).status_code, 404, url)
 
 
 class FilesPageTests(UiTestCase):
@@ -318,7 +326,7 @@ class ScanTests(UiTestCase):
         from fileindex.scanner import cancel_event
         cancel_event.clear()
         self.addCleanup(cancel_event.clear)
-        scan_lock.acquire()
+        self.assertTrue(scan_lock.acquire(blocking=False))
         self.addCleanup(scan_lock.release)
         r = self.client.post("/app/scan/stop/", **HX)
         self.assertTrue(cancel_event.is_set())
@@ -361,11 +369,31 @@ class ScanTests(UiTestCase):
         self.assertContains(self.client.post("/app/scan/clear/", **HX), "permission")
         self.assertEqual(FileIndex.objects.count(), 1)
         self.client.force_login(self.admin)
-        scan_lock.acquire()
+        self.assertTrue(scan_lock.acquire(blocking=False))
         try:
             self.assertContains(self.client.post("/app/scan/clear/", **HX), "scan is running")
         finally:
             scan_lock.release()
+        self.assertEqual(FileIndex.objects.count(), 1)
+
+    def test_reset_all_asks_for_the_word_then_wipes_index_and_history(self):
+        self.add_file(numbers=["9856325417"])
+        ScanTask.objects.create(status="Completed")
+        ask = self.client.get("/app/scan/reset/", **HX)
+        self.assertContains(ask, "Reset all data?")
+        wrong = self.client.post("/app/scan/reset/", {"confirm": "no"}, **HX)
+        self.assertContains(wrong, "Type RESET")
+        self.assertEqual((FileIndex.objects.count(), ScanTask.objects.count()), (1, 1))
+        r = self.client.post("/app/scan/reset/", {"confirm": "reset"}, **HX)
+        self.assertEqual(r.status_code, 204)
+        self.assertEqual((FileIndex.objects.count(), NumberIndex.objects.count(), ScanTask.objects.count()), (0, 0, 0))
+        events = json.loads(r["HX-Trigger"])
+        self.assertTrue(events["indexChanged"] and events["closeModal"] and events["resetBrowserData"])
+
+    def test_reset_all_needs_permission(self):
+        self.add_file()
+        self.client.force_login(self.staff)
+        self.assertContains(self.client.post("/app/scan/reset/", {"confirm": "RESET"}, **HX), "permission")
         self.assertEqual(FileIndex.objects.count(), 1)
 
 
@@ -594,74 +622,143 @@ class SearchTests(UiTestCase):
         with mock.patch.object(core, "MAX_NUMBERS", 3):
             r = self.upload("big.csv", ("\n".join(f"70000{i:05d}" for i in range(10))).encode())
         self.assertContains(r, "Full Excel report")
-        self.assertContains(r, "/admin/file-report-api/")
+        self.assertContains(r, "/app/search/report/")
 
-    def test_search_page_posts_exports_to_the_existing_endpoints(self):
+    def test_search_page_posts_exports_to_the_app_endpoints(self):
         r = self.client.get("/app/search/")
-        self.assertContains(r, 'action="/admin/export-excel-api/"')
-        export = self.client.post("/admin/export-excel-api/", {"numbers": "9856325417", "last10": "1"})
-        self.assertEqual(export.status_code, 200)
-        self.assertIn("spreadsheetml", export["Content-Type"])
+        self.assertContains(r, 'action="/app/search/export/"')
+
+    def test_export_downloads_an_excel_report(self):
+        import openpyxl
+        r = self.client.post("/app/search/export/", {"numbers": "9856325417\n7000000001", "last10": "1"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("spreadsheetml", r["Content-Type"])
+        self.assertIn("attachment; filename=\"number_search_report_", r["Content-Disposition"])
+        wb = openpyxl.load_workbook(io.BytesIO(r.content))
+        self.assertEqual(wb.sheetnames, ["Summary", "By File", "Found", "Not Found"])
+
+    def test_full_report_for_an_uploaded_file(self):
+        import openpyxl
+        up = SimpleUploadedFile("nums.csv", b"9856325417\n7000000001\n")
+        r = self.client.post("/app/search/report/", {"file": up})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(list(openpyxl.load_workbook(io.BytesIO(r.content))["Found"].iter_rows(min_row=2))), 2)    # 2 files me hai
+        r = self.client.post("/app/search/report/", {"file": SimpleUploadedFile("x.txt", b"no digits")})
+        self.assertEqual((r.status_code, r.content.decode()), (400, "No numbers found in the file"))
+        r = self.client.post("/app/search/report/", {})
+        self.assertEqual(r.status_code, 400)
+
+    def test_downloads_need_a_signed_in_staff_user_and_post(self):
+        self.assertEqual(self.client.get("/app/search/export/").status_code, 405)
+        for user in (None, self.outsider):
+            self.client.logout()
+            if user:
+                self.client.force_login(user)
+            for url in ("/app/search/export/", "/app/search/report/"):
+                r = self.client.post(url, {"numbers": "9856325417"})
+                self.assertEqual(r.status_code, 302, url)
+                self.assertTrue(r["Location"].startswith("/app/login/"), url)
 
 
 # ------------------------------------------------------------------ license page
 class LicensePageTests(UiTestCase):
+    ENFORCED = dict(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
+
     def test_not_enforced_page(self):
         r = self.client.get("/app/license/")
         self.assertContains(r, "License checks are switched off")
         self.assertContains(r, "Check for updates")
+        self.assertNotContains(r, "Activate your license")             # development copy me form ka koi kaam nahi
 
-    @override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
-    def test_signed_out_shows_sign_in_and_create_account(self):
+    @override_settings(**ENFORCED)
+    def test_without_a_key_the_page_asks_for_it_and_says_how_to_get_one(self):
         service.invalidate()
-        r = self.client.get("/app/license/")
-        self.assertContains(r, "Not signed in")
-        self.assertContains(r, "Create an account")
-        self.assertContains(r, "I have a license key instead")
+        LicenseState.objects.update_or_create(pk=1, defaults=dict(account_name="Ravi Kumar", account_email="ravi@example.com"))
+        with override_settings(LICENSE_SUPPORT="help@example.com"):
+            r = self.client.get("/app/license/")
+        self.assertContains(r, "Key needed")
+        self.assertContains(r, "Activate your license")
+        self.assertContains(r, "Don't have a key yet?")
+        self.assertContains(r, "help@example.com")
+        self.assertContains(r, "Ravi Kumar &lt;ravi@example.com&gt;")
+        self.assertNotContains(r, "Check now")                           # abhi koi license hi nahi
+        self.assertNotContains(r, "Create an account")
+        self.assertNotContains(r, "Sign in")
 
-    @override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
-    def test_pending_panel_refreshes_itself_and_redirects_when_approved(self):
+    @override_settings(**ENFORCED)
+    def test_active_license_shows_details_and_hides_the_key_form(self):
+        with mock.patch.object(service, "current_status", return_value=protocol.LicenseStatus(
+                "active", True, "License is active.", license_type="yearly", customer="Ravi Kumar", days_left=200)):
+            LicenseState.objects.update_or_create(pk=1, defaults=dict(license_key=GOOD_KEY, token="t"))
+            r = self.client.get("/app/license/")
+        self.assertContains(r, "Active")
+        self.assertContains(r, "Yearly plan")
+        self.assertContains(r, "200 days left")
+        self.assertContains(r, "Check now")
+        self.assertContains(r, "Move this license to another PC")
+        self.assertNotContains(r, "Activate your license")
+        self.assertNotContains(r, GOOD_KEY)                              # puri key kabhi nahi dikhti
+
+    @override_settings(**ENFORCED)
+    def test_cancelled_license_says_so_and_still_lets_you_enter_a_new_key(self):
         LicenseState.objects.update_or_create(pk=1, defaults=dict(
-            account_email="ravi@example.com", device_token="d", blocked_code="pending", blocked_message="Waiting"))
+            license_key=GOOD_KEY, token="t", blocked_code="revoked", blocked_message="Cancelled: refund."))
         service.invalidate()
         r = self.client.get("/app/license/")
-        self.assertContains(r, "Waiting for approval")
-        self.assertContains(r, 'hx-trigger="every 30s"')
-        self.assertContains(r, "ravi@example.com")
-        # plan mil gaya
-        LicenseState.objects.filter(pk=1).update(blocked_code="")
-        with mock.patch.object(service, "current_status", return_value=protocol.LicenseStatus("active", True, "ok")):
-            ok = self.client.get("/app/license/panel/?from=pending", **HX)
-        self.assertEqual((ok.status_code, ok["HX-Redirect"]), (204, "/app/"))
+        self.assertContains(r, "Cancelled")
+        self.assertContains(r, "refund")
+        self.assertContains(r, "Activate your license")
+        self.assertContains(r, "Enter your current key")
+
+    @override_settings(**ENFORCED)
+    def test_staff_who_is_not_an_admin_sees_no_forms(self):
+        service.invalidate()
+        self.client.force_login(self.staff)
+        self.assertNotContains(self.client.get("/app/license/"), "Activate your license")
 
     def test_actions_are_superuser_only(self):
         self.client.force_login(self.staff)
-        for name in ("check", "login", "register", "activate", "signout"):
-            with mock.patch.object(service, "login") as lg, mock.patch.object(service, "register") as rg:
-                r = self.client.post(f"/app/license/{name}/", {"email": "a@b.co", "password": "x", "confirm": "x", "key": "k"}, **HX)
+        for name in ("check", "activate", "deactivate"):
+            with mock.patch.object(service, "activate") as act, mock.patch.object(service, "deactivate") as deact:
+                r = self.client.post(f"/app/license/{name}/", {"key": GOOD_KEY}, **HX)
             self.assertContains(r, "Only an administrator", msg_prefix=name)
-            lg.assert_not_called(); rg.assert_not_called()
+            act.assert_not_called(); deact.assert_not_called()
 
-    def test_sign_in_register_and_check_use_the_service(self):
-        ok = service.Result(True, "Signed in. Monthly plan")
-        with mock.patch.object(service, "login", return_value=ok) as lg:
-            r = self.client.post("/app/license/login/", {"email": "a@b.co", "password": "Str0ng-Pass-77"}, **HX)
-        lg.assert_called_once_with("a@b.co", "Str0ng-Pass-77")
-        self.assertContains(r, "Signed in")
+    def test_removed_account_endpoints_are_gone(self):
+        for name in ("register", "login", "signout", "panel"):
+            self.assertEqual(self.client.post(f"/app/license/{name}/", {}, **HX).status_code, 404, name)
+
+    def test_activating_a_key_opens_the_app(self):
+        ok = service.Result(True, "License activated: Yearly plan.")
+        with mock.patch.object(service, "activate", return_value=ok) as act, \
+                mock.patch.object(service, "current_status", return_value=protocol.LicenseStatus("active", True, "ok")), \
+                override_settings(**self.ENFORCED):
+            r = self.client.post("/app/license/activate/", {"key": GOOD_KEY}, **HX)
+        act.assert_called_once_with(GOOD_KEY)
+        self.assertEqual((r.status_code, r["HX-Redirect"]), (204, "/app/"))
+        self.assertIn("License activated", json.loads(r["HX-Trigger"])["toast"]["message"])
+
+    @override_settings(**ENFORCED)
+    def test_a_wrong_key_stays_on_the_page_with_the_reason(self):
+        service.invalidate()
+        bad = service.Result(False, "This license key is not valid. Please check it and try again.")
+        with mock.patch.object(service, "activate", return_value=bad):
+            r = self.client.post("/app/license/activate/", {"key": "EXFN-AAAAA-AAAAA-AAAAA-AAAAA"}, **HX)
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "not valid")
+        self.assertContains(r, "toast-bad")
         self.assertContains(r, 'id="license-panel"')
-        with mock.patch.object(service, "register", return_value=ok) as rg:
-            self.client.post("/app/license/register/", {"name": "R", "email": "a@b.co", "password": "Str0ng-Pass-77", "confirm": "Str0ng-Pass-77"}, **HX)
-        rg.assert_called_once_with("R", "a@b.co", "Str0ng-Pass-77")
-        with mock.patch.object(service, "check_now", return_value=service.Result(False, "Could not reach the license server.")) as chk:
+        self.assertNotIn("HX-Redirect", r)
+
+    def test_check_and_deactivate_use_the_service(self):
+        with mock.patch.object(service, "check_now", return_value=service.Result(False, "Could not reach the license server.")):
             r = self.client.post("/app/license/check/", **HX)
         self.assertContains(r, "Could not reach")
         self.assertContains(r, "toast-bad")
-
-    def test_register_mismatch_never_reaches_the_service(self):
-        with mock.patch.object(service, "register") as rg:
-            r = self.client.post("/app/license/register/", {"name": "R", "email": "a@b.co", "password": "aaaaaaaa1", "confirm": "bbbbbbbb2"}, **HX)
-        self.assertContains(r, "do not match")
-        rg.assert_not_called()
+        with mock.patch.object(service, "deactivate", return_value=service.Result(True, "This PC has been deactivated.")) as out:
+            r = self.client.post("/app/license/deactivate/", **HX)
+        out.assert_called_once_with()
+        self.assertContains(r, "deactivated")
 
     def test_update_check_and_dismiss_swap_the_banner(self):
         with override_settings(UPDATE_CHECK_URL=""):
@@ -690,6 +787,77 @@ class LicensePageTests(UiTestCase):
         self.assertContains(r, "Excel Finder 1.2.0 is available")
         self.assertContains(r, "This update is required")
         self.assertNotContains(r, "Not now")
+
+
+# ------------------------------------------------------------------ password bhool gaye (reset code)
+@override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
+class ForgotPasswordTests(UiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client.logout()
+        self.owner = get_user_model().objects.create_superuser("ravi@example.com", "ravi@example.com", "Old-Pass-12345")
+        service.invalidate()
+
+    DATA = {"email": "ravi@example.com", "code": "ABCD-EFGH", "password": "Brand-New-Pass-77", "confirm": "Brand-New-Pass-77"}
+
+    def reset(self, **change):
+        return self.client.post("/app/forgot/", {**self.DATA, **change})
+
+    def test_page_explains_the_steps_and_login_links_to_it(self):
+        r = self.client.get("/app/forgot/")
+        self.assertContains(r, "Reset your password")
+        self.assertContains(r, "Email the seller")
+        self.assertContains(r, 'name="code"')
+        self.assertContains(self.client.get("/app/login/"), 'href="/app/forgot/"')
+
+    def test_page_is_open_without_a_license_and_without_signing_in(self):
+        self.assertEqual(self.client.get("/app/forgot/").status_code, 200)       # license band hone par bhi
+
+    def test_right_code_sets_the_new_password_on_this_pc(self):
+        with mock.patch.object(service, "reset_password_code_ok", return_value=service.Result(True, "ok")) as check:
+            r = self.reset()
+        check.assert_called_once_with("ravi@example.com", "ABCD-EFGH")
+        self.assertContains(r, "Password changed")
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password("Brand-New-Pass-77"))
+        self.assertFalse(self.owner.check_password("Old-Pass-12345"))
+        self.assertTrue(self.client.login(username="ravi@example.com", password="Brand-New-Pass-77"))
+
+    def test_wrong_or_expired_code_changes_nothing(self):
+        with mock.patch.object(service, "reset_password_code_ok", return_value=service.Result(False, "That reset code is not valid or has expired.")):
+            r = self.reset()
+        self.assertContains(r, "not valid or has expired")
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password("Old-Pass-12345"))
+
+    def test_local_mistakes_never_use_up_the_code(self):
+        with mock.patch.object(service, "reset_password_code_ok") as check:
+            self.assertContains(self.reset(email="nobody@example.com"), "No user with this email")
+            self.assertContains(self.reset(confirm="Different-Pass-1"), "do not match")
+            self.assertContains(self.reset(password="short", confirm="short"), "too short")
+            self.assertContains(self.reset(password="password", confirm="password"), "too common")
+            self.assertContains(self.reset(code=""), "enter your email and the reset code")
+        check.assert_not_called()
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password("Old-Pass-12345"))
+
+    def test_email_is_matched_ignoring_case(self):
+        with mock.patch.object(service, "reset_password_code_ok", return_value=service.Result(True, "ok")):
+            self.assertContains(self.reset(email="Ravi@Example.COM"), "Password changed")
+
+    def test_offline_gives_the_reason(self):
+        with mock.patch.object(service, "reset_password_code_ok", return_value=service.Result(False, "Could not reach the license server.")):
+            self.assertContains(self.reset(), "Could not reach")
+
+    @override_settings(LICENSE_ENFORCED=False)
+    def test_development_copy_has_no_reset_code(self):
+        r = self.client.get("/app/forgot/")
+        self.assertContains(r, "development copy")
+        self.assertNotContains(r, 'name="code"')
+        with mock.patch.object(service, "reset_password_code_ok") as check:
+            self.reset()
+        check.assert_not_called()
+        self.assertContains(self.client.get("/app/login/"), "Ask the person who installed")
 
 
 # ------------------------------------------------------------------ license gate on /app/
@@ -752,3 +920,4 @@ class TagTests(SimpleTestCase):
     def test_mtime_and_folder(self):
         self.assertEqual(webui_tags.mtime(0), "")
         self.assertEqual(webui_tags.folder_of("/a/b/c.xlsx"), "/a/b")
+

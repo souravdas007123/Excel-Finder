@@ -85,11 +85,9 @@ if not DEBUG:
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
-    'django.contrib.messages',
     'django.contrib.staticfiles',
     'fileindex',  # Hamara custom app
     'licensing',  # License: key, expiry, block
@@ -102,13 +100,12 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'search.middleware.FirstRunSetupMiddleware',   # koi user nahi (pehli baar) toh /setup/
     'licensing.middleware.LicenseMiddleware',   # license khatam ho toh pages band (LICENSE_ENFORCED ho tabhi)
     'search.middleware.UpdateCheckMiddleware',  # roz ek baar 'naya version?' (UPDATE_CHECK_URL ho tabhi)
 ]
-if FROZEN:   # installed app me static files (admin ka CSS/JS) WhiteNoise dega, kyunki DEBUG band hai
+if FROZEN:   # installed app me static files (naye UI ka CSS/JS) WhiteNoise dega, kyunki DEBUG band hai
     MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
 ROOT_URLCONF = 'search.urls'
@@ -122,7 +119,6 @@ TEMPLATES = [
             'context_processors': [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
                 'search.context_processors.update_notice',
                 'webui.context.shell',
             ],
@@ -152,6 +148,9 @@ DATABASES = {
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
+
+if 'test' in sys.argv:    # tests me password hash tez (asli app me pbkdf2: tests 2-3 guna tez chalte hain)
+    PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 
 AUTH_PASSWORD_VALIDATORS = [
     {

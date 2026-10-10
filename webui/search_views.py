@@ -6,7 +6,7 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
 
-from fileindex import views as core
+from fileindex import services as core
 from fileindex.models import FileIndex
 from fileindex.scanner import MIN_DIGITS
 
@@ -193,3 +193,27 @@ def search_extract(request):
         "numbers": "\n".join(shown), "note": " ".join(notes), "note_kind": kind, "big_file": len(unique) > core.MAX_NUMBERS,
         "min_digits": MIN_DIGITS})
     return response
+
+
+def _xlsx(data):
+    response = HttpResponse(data, content_type=core.XLSX_TYPE)
+    response["Content-Disposition"] = f'attachment; filename="{core.xlsx_filename()}"'
+    return response
+
+
+@staff_required
+@require_POST
+def search_export(request):
+    """Screen ke numbers ki Excel report (normal form POST: browser file download karta hai)."""
+    return _xlsx(core.export_report(request.POST.get("numbers", ""), request.POST.get("last10", "1") != "0"))
+
+
+@staff_required
+@require_POST
+def search_report(request):
+    """Upload ki badi file ke SAARE numbers ki Excel report (screen limit ke bina)."""
+    data, error, status = core.file_report(request.FILES.get("file"), bool(request.POST.get("first_col")),
+                                           request.POST.get("last10", "1") != "0")
+    if error:
+        return HttpResponse(error, status=status, content_type="text/plain; charset=utf-8")
+    return _xlsx(data)
