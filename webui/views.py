@@ -1,4 +1,5 @@
 """Naya UI (/app/): login, dashboard, indexed files, scan history. Search / scan / license alag files me."""
+import os
 import re
 
 from django.conf import settings
@@ -8,6 +9,7 @@ from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods, require_POST

@@ -4,7 +4,7 @@
     {% if note %}
     <div class="alert {{ note_kind|default:'info' }}" style="margin-top:10px">
         <div class="grow">{{ note }}</div>
-        {% if big_file %}<button type="submit" class="btn btn-primary btn-sm" form="search-form" formaction="{% url 'webui:search_report' %}" formmethod="post" formenctype="multipart/form-data">{% icon "download" 14 %} Full Excel report</button>{% endif %}
+        {% if big_file %}<button type="submit" class="btn btn-primary btn-sm" form="search-form" formaction="/admin/file-report-api/" formmethod="post" formenctype="multipart/form-data">{% icon "download" 14 %} Full Excel report</button>{% endif %}
     </div>
     {% endif %}
 </div>

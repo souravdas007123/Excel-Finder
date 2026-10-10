@@ -21,8 +21,6 @@ urlpatterns = [
     path("search/run/", search_views.search_run, name="search_run"),
     path("search/extract/", search_views.search_extract, name="search_extract"),
     path("search/row/", search_views.search_row, name="search_row"),
-    path("search/export/", search_views.search_export, name="search_export"),
-    path("search/report/", search_views.search_report, name="search_report"),
     path("search/<str:token>/files/<int:file_id>/", search_views.search_file_details, name="search_file"),
     path("search/<str:token>/<str:tab>/", search_views.search_tab, name="search_tab"),
 
@@ -38,6 +36,4 @@ urlpatterns = [
 
     path("updates/check/", license_views.update_check_now, name="update_check"),
     path("updates/dismiss/", license_views.update_dismiss, name="update_dismiss"),
-    path("updates/install/", license_views.update_install, name="update_install"),
-    path("updates/status/", license_views.update_status, name="update_status"),
 ]

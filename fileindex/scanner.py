@@ -10,7 +10,7 @@ from concurrent.futures.process import BrokenProcessPool
 from django.conf import settings
 from django.db import connection, transaction
 
-from .excel_parser import HAS_CALAMINE, match_key, parse_file
+from .excel_parser import HAS_CALAMINE, match_key, parse_file, read_row  # noqa: F401  (read_row views.py use karta hai)
 from .models import FileIndex, NumberIndex, ScanFailure, ScanTask
 
 logger = logging.getLogger(__name__)

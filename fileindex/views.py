@@ -7,17 +7,20 @@ from collections import Counter, defaultdict
 from datetime import datetime
 
 from django.conf import settings
+from django.contrib.admin.views.decorators import staff_member_required
 from django.db import connection, transaction
+from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
+from django.views.decorators.http import require_GET, require_POST
 from openpyxl.utils import get_column_letter
 
 from licensing.service import record_usage
 
 from .drives import get_scan_locations
-from .excel_parser import extract_numbers, match_key, parse_file, read_row
+from .excel_parser import extract_numbers, match_key, parse_file
 from .models import FileIndex, NumberIndex, ScanTask
 from .report import build_report
-from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, cancel_event, run_scan, scan_lock, scan_progress
+from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, cancel_event, read_row, run_scan, scan_lock, scan_progress
 
 MAX_NUMBERS = 2000          # ek baar me max numbers (isse zyada ho toh full Excel report milti hai)
 DETAIL_LIMIT = 2000         # isse zyada numbers par per-number detail nahi bhejte (page tez rahe)
@@ -98,6 +101,33 @@ def scan_status(task):
     }
 
 
+@staff_member_required
+@require_POST
+def start_scan_api(request):
+    task_id, error, status = start_scan(request.user, request.POST.get("location", ""), request.POST.get("custom_path", ""))
+    if error:
+        return JsonResponse({"error": error}, status=status)
+    return JsonResponse({"task_id": task_id, "status": "started"})
+
+
+@staff_member_required
+@require_POST
+def stop_scan_api(request):
+    ok, error = stop_scan()
+    if not ok:
+        return JsonResponse({"error": error}, status=409)
+    return JsonResponse({"status": "stopping"})
+
+
+@staff_member_required
+@require_GET
+def check_scan_status(request, task_id):
+    task = ScanTask.objects.filter(id=task_id).first()
+    if not task:
+        return JsonResponse({"error": "Task not found"}, status=404)
+    return JsonResponse(scan_status(task))
+
+
 def browse_folders(path):
     """Folder picker: (data dict, None, None) ya (None, error, status). data = {path, parent, folders[]}."""
     path = (path or "").strip()
@@ -130,7 +160,24 @@ def browse_folders(path):
     return {"path": path, "parent": parent, "folders": folders[:1000]}, None, None
 
 
+@staff_member_required
+@require_GET
+def browse_folders_api(request):
+    """Folder picker ke liye: diye gaye path ke andar ke sub-folders ki list."""
+    if not custom_path_allowed(request.user):
+        return JsonResponse({"error": "Not allowed"}, status=403)
+    data, error, status = browse_folders(request.GET.get("path", ""))
+    if error:
+        return JsonResponse({"error": error}, status=status)
+    return JsonResponse(data)
+
+
 # ------------------------------------------------------------------ search
+def _want_last10(request):
+    """Phone match (country code / leading 0 ignore) default ON. Page 'last10=0' bheje toh exact match."""
+    return request.POST.get("last10", "1") != "0"
+
+
 def _dedupe(numbers, last10):
     """Order maintain karke duplicates hatao. last10 ON ho toh '9856325417' aur '919856325417' ek hi maane jaate hain."""
     if not last10:
@@ -276,6 +323,12 @@ def bulk_search_payload(raw_numbers, last10=True):
     }
 
 
+@staff_member_required
+@require_POST
+def bulk_search_api(request):
+    return JsonResponse(bulk_search_payload(request.POST.get("numbers", ""), _want_last10(request)))
+
+
 def file_locations(file_id, raw_numbers, last10=True):
     """Ek file me diye gaye numbers ki jagah: [{number, locations: [{sheet, row, col, column, stored}]}]."""
     numbers, _, _ = _parse_numbers(raw_numbers, last10)
@@ -304,6 +357,17 @@ def file_locations(file_id, raw_numbers, last10=True):
     return items
 
 
+@staff_member_required
+@require_POST
+def file_locations_api(request):
+    """'View details' click par: ek file me diye gaye numbers ki jagah (sheet / row / column)."""
+    try:
+        file_id = int(request.POST.get("file_id", ""))
+    except ValueError:
+        return JsonResponse({"error": "Invalid request"}, status=400)
+    return JsonResponse({"file_id": file_id, "items": file_locations(file_id, request.POST.get("numbers", ""), _want_last10(request))})
+
+
 def row_cells(file_id, sheet, row_no, col=0):
     """Us row ka poora data file se padhkar: (file, cells, None, None) ya (None, None, error, status)."""
     f = FileIndex.objects.filter(id=file_id).first()   # path DB se aata hai, client se nahi
@@ -323,6 +387,22 @@ def row_cells(file_id, sheet, row_no, col=0):
         if h or v:
             cells.append({"col": get_column_letter(i + 1), "header": h, "value": v, "hit": (i + 1) == col})
     return f, cells, None, None
+
+
+@staff_member_required
+@require_GET
+def row_detail_api(request):
+    """'View full row' click par us row ka poora data file se padhkar deta hai."""
+    try:
+        file_id = int(request.GET.get("file_id", ""))
+        row_no = int(request.GET.get("row", ""))
+        col = int(request.GET.get("col", "0") or 0)
+    except ValueError:
+        return JsonResponse({"error": "Invalid request"}, status=400)
+    _f, cells, error, status = row_cells(file_id, request.GET.get("sheet", ""), row_no, col)
+    if error:
+        return JsonResponse({"error": error}, status=status)
+    return JsonResponse({"cells": cells})
 
 
 # ------------------------------------------------------------------ upload numbers from file
@@ -380,35 +460,71 @@ def read_upload_numbers(upload, first_col=False, last10=True):
     return (upload.name, unique, len(found) - len(unique)), None, None
 
 
-def xlsx_filename():
-    return datetime.now().strftime("number_search_report_%Y%m%d_%H%M.xlsx")
-
-
-def export_report(raw_numbers, last10=True):
-    """Screen par jo numbers hain unki Excel report (bytes)."""
-    numbers, skipped, duplicates = _parse_numbers(raw_numbers, last10)
-    numbers = numbers[:MAX_NUMBERS]
-    max_hits = EXPORT_MAX_HITS if len(numbers) <= DETAIL_LIMIT else EXPORT_MAX_HITS_HUGE
-    file_stats = {}
-    return build_report(_lookup_chunks(numbers, max_hits, file_stats, last10), len(numbers), skipped, duplicates,
-                        max_hits, file_stats, last10)
-
-
-def file_report(upload, first_col=False, last10=True):
-    """Badi file ke SAARE numbers search karke Excel report (screen limit ke bina): (bytes, None, None) ya (None, error, status)."""
-    result, error, status = read_upload_numbers(upload, first_col, last10)
+def _read_upload(request):
+    """Upload se numbers nikalta hai. Returns ((file name, unique numbers, duplicates), None) ya (None, error response)."""
+    result, error, status = read_upload_numbers(request.FILES.get("file"), bool(request.POST.get("first_col")),
+                                                _want_last10(request))
     if error:
-        return None, error, status
+        return None, JsonResponse({"error": error}, status=status)
+    return result, None
+
+
+@staff_member_required
+@require_POST
+def extract_numbers_api(request):
+    """Uploaded file se numbers nikal kar deta hai (screen par dikhane ke liye, max MAX_NUMBERS)."""
+    result, error = _read_upload(request)
+    if error:
+        return error
+    name, unique, _ = result
+    return JsonResponse({
+        "file": name,
+        "numbers": unique[:MAX_NUMBERS],
+        "total": len(unique),
+        "truncated": len(unique) > MAX_NUMBERS,
+        "max": MAX_NUMBERS,
+    })
+
+
+def _xlsx_response(data):
+    filename = datetime.now().strftime("number_search_report_%Y%m%d_%H%M.xlsx")
+    response = HttpResponse(data, content_type=XLSX_TYPE)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@staff_member_required
+@require_POST
+def file_report_api(request):
+    """Badi file ke SAARE numbers search karke seedha Excel report deta hai (screen limit ke bina)."""
+    result, error = _read_upload(request)
+    if error:
+        return error
     _name, numbers, duplicates = result
     if not numbers:
-        return None, "No numbers found in the file", 400
+        return JsonResponse({"error": "No numbers found in the file"}, status=400)
 
     numbers = numbers[:MAX_FILE_NUMBERS]
     max_hits = EXPORT_MAX_HITS if len(numbers) <= DETAIL_LIMIT else EXPORT_MAX_HITS_HUGE
     file_stats = {}
+    last10 = _want_last10(request)
     data = build_report(_lookup_chunks(numbers, max_hits, file_stats, last10), len(numbers), [],
                         duplicates, max_hits, file_stats, last10)
-    return data, None, None
+    return _xlsx_response(data)
+
+
+# ------------------------------------------------------------------ Excel report
+@staff_member_required
+@require_POST
+def export_excel_api(request):
+    last10 = _want_last10(request)
+    numbers, skipped, duplicates = _parse_numbers(request.POST.get("numbers", ""), last10)
+    numbers = numbers[:MAX_NUMBERS]
+    max_hits = EXPORT_MAX_HITS if len(numbers) <= DETAIL_LIMIT else EXPORT_MAX_HITS_HUGE
+    file_stats = {}
+    data = build_report(_lookup_chunks(numbers, max_hits, file_stats, last10), len(numbers), skipped, duplicates,
+                        max_hits, file_stats, last10)
+    return _xlsx_response(data)
 
 
 def clear_index(user):
@@ -433,3 +549,12 @@ def clear_index(user):
         scan_lock.release()
     return files_removed, None, None
 
+
+@staff_member_required
+@require_POST
+def clear_index_api(request):
+    """Poora index (files + numbers) ek jhatke me hatata hai. Disk ki Excel files ko haath nahi lagata."""
+    removed, error, status = clear_index(request.user)
+    if error:
+        return JsonResponse({"error": error}, status=status)
+    return JsonResponse({"status": "cleared", "files_removed": removed})

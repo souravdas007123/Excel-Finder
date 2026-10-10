@@ -69,7 +69,7 @@ class UpdateTestCase(TestCase):
         update_check._state["next_attempt"] = float("inf")     # test ke dauran asli background thread nahi (file race se bachne ke liye)
         self.client.force_login(self.admin)
 
-    def page(self, name="webui:dashboard"):
+    def page(self, name="admin:index"):
         return self.client.get(reverse(name))
 
 
@@ -152,9 +152,9 @@ class CheckTests(UpdateTestCase):
 
 
 class NoticeTests(UpdateTestCase):
-    def test_banner_shows_notes_and_a_download_link_on_every_page(self):
+    def test_banner_shows_notes_and_a_download_link_on_every_admin_page(self):
         update_check.check_now()
-        for name in ("webui:dashboard", "webui:scan", "webui:search", "webui:license"):
+        for name in ("admin:index", "admin:fileindex_fileindex_changelist", "admin:fileindex_bulksearch_changelist"):
             r = self.page(name)
             self.assertContains(r, "Excel Finder 1.2.0 is available", msg_prefix=name)
             self.assertContains(r, "Faster scans")
@@ -166,10 +166,9 @@ class NoticeTests(UpdateTestCase):
 
     def test_not_now_hides_it_until_a_newer_version(self):
         update_check.check_now()
-        r = self.client.post(reverse("webui:update_dismiss"), {"version": "1.2.0"}, HTTP_HX_REQUEST="true")
-        self.assertEqual(r.status_code, 200)
-        self.assertNotContains(r, "is available")                     # naya banner khali
-        self.assertNotContains(self.page(), "is available")
+        r = self.client.post(reverse("update_dismiss"), {"version": "1.2.0", "next": "/admin/"})
+        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+        self.assertNotContains(self.page(), "is available (you have")
         self.server.set({**GOOD, "version": "1.3.0"})
         update_check.check_now()
         self.assertContains(self.page(), "Excel Finder 1.3.0 is available")
@@ -180,7 +179,7 @@ class NoticeTests(UpdateTestCase):
         update_check.dismiss("1.2.0")
         r = self.page()
         self.assertContains(r, "no longer supported")
-        self.assertContains(r, 'class="alert bad"')
+        self.assertContains(r, "update-banner critical")
         self.assertNotContains(r, "Not now")
 
     def test_notes_cannot_inject_html(self):
@@ -193,34 +192,38 @@ class NoticeTests(UpdateTestCase):
     def test_banner_is_for_signed_in_staff_only(self):
         update_check.check_now()
         self.client.logout()
-        self.assertNotContains(self.client.get(reverse("webui:login")), "is available (you have")
+        self.assertNotContains(self.client.get(reverse("admin:login")), "is available (you have")
         self.client.force_login(self.outsider)
-        self.assertNotContains(self.client.get(reverse("webui:login")), "is available (you have")
+        self.assertNotContains(self.client.get(reverse("admin:login")), "is available (you have")
+
+    def test_dismiss_redirect_is_safe(self):
+        update_check.check_now()
+        r = self.client.post(reverse("update_dismiss"), {"version": "1.2.0", "next": "https://evil.example/phish"})
+        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
 
     def test_actions_need_post_and_login(self):
-        self.assertEqual(self.client.get(reverse("webui:update_check")).status_code, 405)
-        self.assertEqual(self.client.get(reverse("webui:update_dismiss")).status_code, 405)
+        self.assertEqual(self.client.get(reverse("update_check")).status_code, 405)
+        self.assertEqual(self.client.get(reverse("update_dismiss")).status_code, 405)
         self.client.logout()
-        self.assertEqual(self.client.post(reverse("webui:update_check")).status_code, 302)
+        self.assertEqual(self.client.post(reverse("update_check")).status_code, 302)
 
     def test_check_button(self):
-        r = self.client.post(reverse("webui:update_check"), HTTP_HX_REQUEST="true")
+        r = self.client.post(reverse("update_check"), {"next": "/admin/"}, follow=True)
         self.assertContains(r, "Version 1.2.0 is available")
-        self.assertContains(r, 'id="update-banner"')               # banner bhi saath badalta hai
         self.server.set({**GOOD, "version": "1.0.0"})
-        r = self.client.post(reverse("webui:update_check"), HTTP_HX_REQUEST="true")
+        r = self.client.post(reverse("update_check"), {"next": "/admin/"}, follow=True)
         self.assertContains(r, "You have the latest version")
 
     def test_check_button_when_not_configured(self):
         with override_settings(UPDATE_CHECK_URL=""):
-            r = self.client.post(reverse("webui:update_check"), HTTP_HX_REQUEST="true")
+            r = self.client.post(reverse("update_check"), {"next": "/admin/"}, follow=True)
         self.assertContains(r, "not set up")
 
     def test_update_pages_stay_open_without_a_license(self):
         with override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x"):
-            r = self.client.post(reverse("webui:update_check"), HTTP_HX_REQUEST="true")
-        self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "Version 1.2.0 is available")
+            r = self.client.post(reverse("update_check"), {"next": "/admin/"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(r["Location"], "/admin/")
 
 
 class BackgroundTests(UpdateTestCase):
@@ -257,13 +260,13 @@ class BackgroundTests(UpdateTestCase):
         self.assertEqual(len(self.run_maybe()), 1)
         self.assertEqual(self.run_maybe(), [])                        # 5 minute ke andar dobara nahi
 
-    def test_only_app_get_requests_of_staff_trigger_it(self):
+    def test_only_admin_get_requests_of_staff_trigger_it(self):
         with mock.patch.object(update_check, "maybe_background_check") as trigger:
-            self.client.get(reverse("webui:dashboard"))
+            self.client.get(reverse("admin:index"))
             self.assertEqual(trigger.call_count, 1)
-            self.client.post(reverse("webui:update_dismiss"), {"version": "1.2.0"})
+            self.client.post(reverse("update_dismiss"), {"version": "1.2.0"})
             self.client.logout()
-            self.client.get(reverse("webui:login"))
+            self.client.get(reverse("admin:login"))
             self.assertEqual(trigger.call_count, 1)
 
     def test_worker_survives_errors(self):
