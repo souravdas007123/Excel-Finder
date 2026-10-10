@@ -433,6 +433,8 @@ class UsageTests(LicenseTestCase):
         self.activate_ok()
         for _ in range(3):
             self.client.post(reverse("bulk_search"), {"numbers": "9856325417"})
+        from fileindex.scanner import scan_lock
+        self.addCleanup(lambda: scan_lock.locked() and scan_lock.release())      # run_scan nakli hai, lock wo chhodta nahi
         with mock.patch("fileindex.views.run_scan"):
             self.client.post(reverse("start_scan"), {"location": "__custom__", "custom_path": os.path.dirname(__file__)})
         state = LicenseState.get()

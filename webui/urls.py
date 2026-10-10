@@ -32,8 +32,6 @@ urlpatterns = [
     path("license/panel/", license_views.license_panel, name="license_panel"),
     path("license/check/", license_views.license_check, name="license_check"),
     path("license/login/", license_views.license_login, name="license_login"),
-    path("license/register/", license_views.license_register, name="license_register"),
-    path("license/activate/", license_views.license_activate, name="license_activate"),
     path("license/signout/", license_views.license_signout, name="license_signout"),
 
     path("updates/check/", license_views.update_check_now, name="update_check"),

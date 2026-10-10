@@ -62,7 +62,7 @@ try {
 
     Step "Writing licensing\build_config.py (license server address + public key)"
     $cfg = @("installer\make_build_config.py", "--server", $ServerUrl)
-    if ($PrivateKeyFile) { $cfg += @("--private-key-file", $PrivateKeyFile) } else { $cfg += @("--public-key", $PublicKey) }
+    if ($PrivateKeyFile) { $cfg += @("--private-key-file", $PrivateKeyFile) } else { $cfg += "--public-key=$PublicKey" }
     if ($BuyUrl) { $cfg += @("--buy-url", $BuyUrl) }
     if ($Support) { $cfg += @("--support", $Support) }
     if ($UpdateUrl) { $cfg += @("--update-url", $UpdateUrl) }

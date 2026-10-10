@@ -84,23 +84,6 @@ def license_login(request):
 @staff_required
 @require_POST
 @_admin_only
-def license_register(request):
-    if request.POST.get("password", "") != request.POST.get("confirm", ""):
-        return message_only("The two passwords do not match.", "bad")
-    return _result(request, service.register(request.POST.get("name", ""), request.POST.get("email", ""),
-                                             request.POST.get("password", "")))
-
-
-@staff_required
-@require_POST
-@_admin_only
-def license_activate(request):
-    return _result(request, service.activate(request.POST.get("key", "")))
-
-
-@staff_required
-@require_POST
-@_admin_only
 def license_signout(request):
     return _result(request, service.deactivate())
 
