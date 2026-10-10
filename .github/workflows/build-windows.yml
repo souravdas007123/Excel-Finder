@@ -39,20 +39,20 @@ jobs:
           SUPPORT: ${{ vars.SUPPORT_EMAIL }}
           BUY_URL: ${{ vars.BUY_URL }}
         run: |
-          $buildArgs = @()
+          $buildArgs = @{}
           if ($env:SERVER_URL -and $env:PUBLIC_KEY) {
               Write-Host "Real build for $env:SERVER_URL"
-              $buildArgs += @("-ServerUrl", $env:SERVER_URL, "-PublicKey", $env:PUBLIC_KEY)
+              $buildArgs.ServerUrl = $env:SERVER_URL; $buildArgs.PublicKey = $env:PUBLIC_KEY
               Set-Content -Path build-kind.txt -Value "release"
           } else {
               Write-Host "LICENSE_SERVER_URL / LICENSE_PUBLIC_KEY not set: making a TEST build (talks to 127.0.0.1:8800 only)."
               python -m pip install --quiet cryptography
               $test = (python -c "from licensing import protocol; print(protocol.generate_keypair()[1])").Trim()
-              $buildArgs += @("-ServerUrl", "http://127.0.0.1:8800", "-AllowHttp", "-PublicKey", $test)
+              $buildArgs.ServerUrl = "http://127.0.0.1:8800"; $buildArgs.AllowHttp = $true; $buildArgs.PublicKey = $test
               Set-Content -Path build-kind.txt -Value "test"
           }
-          if ($env:SUPPORT) { $buildArgs += @("-Support", $env:SUPPORT) }
-          if ($env:BUY_URL) { $buildArgs += @("-BuyUrl", $env:BUY_URL) }
+          if ($env:SUPPORT) { $buildArgs.Support = $env:SUPPORT }
+          if ($env:BUY_URL) { $buildArgs.BuyUrl = $env:BUY_URL }
           & .\installer\build_windows.ps1 @buildArgs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
