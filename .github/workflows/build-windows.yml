@@ -53,7 +53,7 @@ jobs:
           }
           if ($env:SUPPORT) { $buildArgs += @("-Support", $env:SUPPORT) }
           if ($env:BUY_URL) { $buildArgs += @("-BuyUrl", $env:BUY_URL) }
-          & .\installer\build_windows.ps1 @args
+          & .\installer\build_windows.ps1 @buildArgs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Checksum
