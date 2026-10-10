@@ -1,0 +1,75 @@
+# Windows par Setup.exe banata hai (GitHub ka Windows computer). Aapko apne PC par kuch install nahi karna.
+#
+# Kaise chalate hain: GitHub > Actions > "Build Windows installer" > Run workflow. Ya installer/ ya is file me badlav push karo.
+# Asli (customer wala) build ke liye repo me ye 2 Variables set karo: Settings > Secrets and variables > Actions > Variables
+#   LICENSE_SERVER_URL   jaise https://USERNAME.pythonanywhere.com
+#   LICENSE_PUBLIC_KEY   license server ki PUBLIC key (keygen se)
+#   (optional) SUPPORT_EMAIL, BUY_URL
+# Variables na hon toh ek TEST build banta hai (naam me TEST): wo sirf apne PC ke local license server (127.0.0.1:8800) se baat karta hai.
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test]
+    paths:
+      - ".github/workflows/build-windows.yml"
+      - "installer/**"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        shell: pwsh
+        env:
+          SERVER_URL: ${{ vars.LICENSE_SERVER_URL }}
+          PUBLIC_KEY: ${{ vars.LICENSE_PUBLIC_KEY }}
+          SUPPORT: ${{ vars.SUPPORT_EMAIL }}
+          BUY_URL: ${{ vars.BUY_URL }}
+        run: |
+          $buildArgs = @()
+          if ($env:SERVER_URL -and $env:PUBLIC_KEY) {
+              Write-Host "Real build for $env:SERVER_URL"
+              $buildArgs += @("-ServerUrl", $env:SERVER_URL, "-PublicKey", $env:PUBLIC_KEY)
+              Set-Content -Path build-kind.txt -Value "release"
+          } else {
+              Write-Host "LICENSE_SERVER_URL / LICENSE_PUBLIC_KEY not set: making a TEST build (talks to 127.0.0.1:8800 only)."
+              python -m pip install --quiet cryptography
+              $test = (python -c "from licensing import protocol; print(protocol.generate_keypair()[1])").Trim()
+              $buildArgs += @("-ServerUrl", "http://127.0.0.1:8800", "-AllowHttp", "-PublicKey", $test)
+              Set-Content -Path build-kind.txt -Value "test"
+          }
+          if ($env:SUPPORT) { $buildArgs += @("-Support", $env:SUPPORT) }
+          if ($env:BUY_URL) { $buildArgs += @("-BuyUrl", $env:BUY_URL) }
+          & .\installer\build_windows.ps1 @args
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist\installer\*.exe | Select-Object -First 1
+          if (-not $exe) { throw "No installer was produced" }
+          $hash = (Get-FileHash -Algorithm SHA256 $exe.FullName).Hash.ToLower()
+          Set-Content -Path dist\installer\SHA256.txt -Value "$hash  $($exe.Name)"
+          "$($exe.Name)  $([math]::Round($exe.Length / 1MB, 1)) MB  SHA-256 $hash" | Write-Host
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExcelFinder-Setup
+          path: |
+            dist/installer/*.exe
+            dist/installer/SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
