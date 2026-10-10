@@ -17,6 +17,7 @@ urlpatterns = [
     path("scan/stop/", scan_views.scan_stop, name="scan_stop"),
     path("scan/browse/", scan_views.scan_browse, name="scan_browse"),
     path("scan/clear/", scan_views.scan_clear, name="scan_clear"),
+    path("scan/reset/", scan_views.scan_reset, name="scan_reset"),
 
     path("search/", search_views.search_page, name="search"),
     path("search/run/", search_views.search_run, name="search_run"),
