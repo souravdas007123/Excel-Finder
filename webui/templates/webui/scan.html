@@ -6,7 +6,7 @@
 {% block actions %}<a class="btn btn-sm" href="{% url 'webui:search' %}" {% navattrs %}>Next: Bulk search {% icon "arrow" 15 %}</a>{% endblock %}
 {% block content %}
 <div class="stack">
-    <div id="scan-stats" class="card" hx-get="{% url 'webui:scan' %}" hx-trigger="indexChanged from:body" hx-select="#scan-stats" hx-target="this" hx-swap="outerHTML">
+    <div id="scan-stats" class="card" hx-get="{% url 'webui:scan' %}" hx-trigger="indexChanged from:body" hx-select="#scan-stats" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">
         <div class="row" style="justify-content:space-between">
             <div>
                 {% if files %}<b style="font-size:18px">{{ files|comma }}</b> files &middot; <b style="font-size:18px">{{ numbers|comma }}</b> numbers indexed
@@ -50,6 +50,7 @@
         <div id="scan-live" style="margin-top:18px"{% if running %} hx-get="{% url 'webui:scan_status' %}?task={{ running.id }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}></div>
     </div>
 
+    <div id="scan-clear" hx-get="{% url 'webui:scan' %}" hx-trigger="indexChanged from:body" hx-select="#scan-clear" hx-target="this" hx-swap="outerHTML" hx-disinherit="*">
     {% if can_clear and files %}
     <div class="card">
         <div class="card-head"><h2>{% icon "trash" 18 %} Clear the index</h2></div>
@@ -57,5 +58,6 @@
         <button type="button" class="btn btn-danger" hx-get="{% url 'webui:scan_clear' %}" hx-target="#modal-body">{% icon "trash" 16 %} Clear file index…</button>
     </div>
     {% endif %}
+    </div>
 </div>
 {% endblock %}
