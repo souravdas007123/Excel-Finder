@@ -376,6 +376,26 @@ class ScanTests(UiTestCase):
             scan_lock.release()
         self.assertEqual(FileIndex.objects.count(), 1)
 
+    def test_reset_all_asks_for_the_word_then_wipes_index_and_history(self):
+        self.add_file(numbers=["9856325417"])
+        ScanTask.objects.create(status="Completed")
+        ask = self.client.get("/app/scan/reset/", **HX)
+        self.assertContains(ask, "Reset all data?")
+        wrong = self.client.post("/app/scan/reset/", {"confirm": "no"}, **HX)
+        self.assertContains(wrong, "Type RESET")
+        self.assertEqual((FileIndex.objects.count(), ScanTask.objects.count()), (1, 1))
+        r = self.client.post("/app/scan/reset/", {"confirm": "reset"}, **HX)
+        self.assertEqual(r.status_code, 204)
+        self.assertEqual((FileIndex.objects.count(), NumberIndex.objects.count(), ScanTask.objects.count()), (0, 0, 0))
+        events = json.loads(r["HX-Trigger"])
+        self.assertTrue(events["indexChanged"] and events["closeModal"] and events["resetBrowserData"])
+
+    def test_reset_all_needs_permission(self):
+        self.add_file()
+        self.client.force_login(self.staff)
+        self.assertContains(self.client.post("/app/scan/reset/", {"confirm": "RESET"}, **HX), "permission")
+        self.assertEqual(FileIndex.objects.count(), 1)
+
 
 # ------------------------------------------------------------------ search
 class SearchTests(UiTestCase):
@@ -900,3 +920,4 @@ class TagTests(SimpleTestCase):
     def test_mtime_and_folder(self):
         self.assertEqual(webui_tags.mtime(0), "")
         self.assertEqual(webui_tags.folder_of("/a/b/c.xlsx"), "/a/b")
+
