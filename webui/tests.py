@@ -14,7 +14,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from fileindex import views as core
 from fileindex.excel_parser import match_key
 from fileindex.models import FileIndex, NumberIndex, ScanFailure, ScanTask
-from fileindex.scanner import scan_lock
+from fileindex.scanner import scan_lock, scan_progress
 from licensing import protocol, service
 from licensing.models import LicenseState
 from search import middleware as first_run
@@ -45,6 +45,9 @@ class UiTestCase(TestCase):
     def setUp(self):
         first_run.reset_first_run_cache()
         cache.clear()
+        if scan_lock.locked():              # kisi purane test ka atka hua lock (warna test hamesha ke liye ruk jata)
+            scan_lock.release()
+        scan_progress.update(run=None, task_id=None, total=None, counted=0)      # purane scan ki ginti
         self.client.force_login(self.admin)
 
     def add_file(self, name="sales.xlsx", folder="/data/Sales", numbers=(), sheet="Sheet1", mtime=1_700_000_000):
@@ -138,7 +141,7 @@ class DashboardTests(UiTestCase):
 
     def test_running_scan_banner(self):
         ScanTask.objects.create(status="Running", files_indexed=7)
-        scan_lock.acquire()
+        self.assertTrue(scan_lock.acquire(blocking=False))
         self.addCleanup(scan_lock.release)
         self.assertContains(self.client.get("/app/"), "A scan is running")
 
@@ -318,7 +321,7 @@ class ScanTests(UiTestCase):
         from fileindex.scanner import cancel_event
         cancel_event.clear()
         self.addCleanup(cancel_event.clear)
-        scan_lock.acquire()
+        self.assertTrue(scan_lock.acquire(blocking=False))
         self.addCleanup(scan_lock.release)
         r = self.client.post("/app/scan/stop/", **HX)
         self.assertTrue(cancel_event.is_set())
@@ -361,7 +364,7 @@ class ScanTests(UiTestCase):
         self.assertContains(self.client.post("/app/scan/clear/", **HX), "permission")
         self.assertEqual(FileIndex.objects.count(), 1)
         self.client.force_login(self.admin)
-        scan_lock.acquire()
+        self.assertTrue(scan_lock.acquire(blocking=False))
         try:
             self.assertContains(self.client.post("/app/scan/clear/", **HX), "scan is running")
         finally:
