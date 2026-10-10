@@ -54,7 +54,7 @@ Result: `dist\installer\ExcelFinder-Setup-1.0.0.exe`. **Ye test build hai (127.0
 7. Update test: version `1.0.1` ki dusri Setup.exe banao, Drive par daalo, admin panel > App releases > Add (SHA-256 build ke ant me). App me "Check for updates" > **Update now**.
 
 ## Bechne se pehle baaki kaam (abhi nahi hue)
-1. **Licence server online** (free: PythonAnywhere, ya VPS). Bina domain ke `aapkanaam.pythonanywhere.com` chalega. Customer ko dene wale installer me `-ServerUrl https://...` wahi daalna (installer ke andar band ho jata hai, baad me nahi badlega).
+1. **Licence server online**: PythonAnywhere par step by step `license_server/PYTHONANYWHERE.md` (ya VPS). Bina domain ke `aapkanaam.pythonanywhere.com` chalega. Customer ko dene wale installer me `-ServerUrl https://...` wahi daalna (installer ke andar band ho jata hai, baad me nahi badlega).
 2. `-BuyUrl`, `-Support`, `-UpdateUrl` optional hain; domain na ho toh chhod sakte ho.
 3. Saaf Windows PC / VM par installer test; **code-signing** (warna "Windows protected your PC").
 4. `docs/EULA_template.txt`, `docs/PRIVACY_template.md` vakeel se dikhwana, phir `installer/EULA.txt`.

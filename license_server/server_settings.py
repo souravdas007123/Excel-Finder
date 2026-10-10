@@ -9,6 +9,7 @@ Environment variables (server par zaroori):
     LICENSE_SERVER_ALLOWED_HOSTS jaise: license.example.com
     LICENSE_PRIVATE_KEY          signing key (ya file license_server/private_key.txt). Banane ke liye: manage.py keygen
     LICENSE_SERVER_DEBUG=1       sirf apne computer par testing ke liye
+Ye sab `license_server/server.env` file me bhi likh sakte ho (KEY=VALUE, har line ek): hosting (PythonAnywhere) par yahi aasan hai.
 """
 import os
 from pathlib import Path
@@ -17,6 +18,28 @@ from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 _HERE = Path(__file__).resolve().parent
+
+
+def load_env_file(path):
+    """`license_server/server.env` ki KEY=VALUE lines ko environment me daalo (hosting par har jagah export na karna pade).
+    Pehle se set environment variable ko ye badalti nahi. File git me nahi jati (.gitignore)."""
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key:
+            os.environ.setdefault(key, value)
+
+
+load_env_file(os.environ.get("LICENSE_SERVER_ENV_FILE") or _HERE / "server.env")
 
 
 def _env_bool(name, default=False):

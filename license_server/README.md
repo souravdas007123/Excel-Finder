@@ -3,6 +3,8 @@
 Ye chhota Django app customer ki licenses sambhalta hai: key banana, PC par activate, renewal, block. **Ye customer ko mat dena.**
 (Customer wali app me iska sirf address aur PUBLIC key hoti hai.)
 
+> **PythonAnywhere par chalana ho** (sabse aasan, domain nahi chahiye): `license_server/PYTHONANYWHERE.md` dekho.
+
 ## 1. Pehli baar (apne computer par try karo)
 ```bash
 export LICENSE_SERVER_DEBUG=1
@@ -25,6 +27,7 @@ export LICENSE_SERVER_CSRF_ORIGINS=https://license.example.com
 export LICENSE_SERVER_TRUST_PROXY=1                            # nginx ke peeche ho toh (asli IP ke liye)
 export LICENSE_SERVER_DB=/var/lib/license/license.sqlite3     # backup is file ka lo
 # Private key: license_server/private_key.txt (keygen --write) ya LICENSE_PRIVATE_KEY=<key>
+# (Ye sab `license_server/server.env` file me KEY=VALUE likh kar bhi de sakte ho: export ki zarurat nahi)
 
 python manage.py migrate --settings=license_server.server_settings
 python manage.py collectstatic --noinput --settings=license_server.server_settings
