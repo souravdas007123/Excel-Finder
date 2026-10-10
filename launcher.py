@@ -44,9 +44,17 @@ def redirect_output_if_no_console(folder):
 
 
 def port_is_free(port):
+    """Port khali hai ya nahi. Pehle connect (koi sun raha ho toh busy), phir bind: Windows par sunne wale ka
+    queue bhara ho toh connect fail hota hai aur busy port bhi 'khali' dikh jata hai, bind ye pakad leta hai."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-        return s.connect_ex(("127.0.0.1", port)) != 0
+        if s.connect_ex(("127.0.0.1", port)) == 0:
+            return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
 
 
 def pick_port(preferred):
