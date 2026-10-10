@@ -1,0 +1,23 @@
+{% load webui_tags %}{% for f in items %}
+<tr>
+    <td>
+        <div class="fname">{{ f.file }}</div>
+        <div class="fpath">{{ f.folder }}</div>
+        <div class="chips" style="margin-top:8px">{% for n in f.preview %}<span class="num-chip">{{ n }}</span>{% endfor %}{% if f.more_numbers %}<span class="hint">+{{ f.more_numbers|comma }} more</span>{% endif %}</div>
+        <div id="fd-{{ f.file_id }}" hidden class="detail-box" style="margin-top:10px;border-radius:8px"><span class="hint">Loading…</span></div>
+    </td>
+    <td class="num"><span class="pill accent">{{ f.numbers_count|comma }}</span></td>
+    <td class="num">{{ f.matches|comma }}</td>
+    <td class="hide-sm muted">{{ f.modified }}</td>
+    <td class="num" style="white-space:nowrap">
+        <button type="button" class="btn btn-sm" data-toggle="fd-{{ f.file_id }}" aria-expanded="false"
+                hx-get="{% url 'webui:search_file' token f.file_id %}" hx-trigger="click once" hx-target="#fd-{{ f.file_id }}" hx-swap="innerHTML">Details</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-copy="{{ f.path }}" title="Copy full path">{% icon "copy" 14 %}</button>
+    </td>
+</tr>
+{% endfor %}
+{% if has_more %}
+<tr class="more-row" hx-get="{% url 'webui:search_tab' token 'files' %}?page={{ next_page }}&q={{ q|urlencode }}&sort={{ sort }}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this">
+    <td colspan="5" class="hint" style="text-align:center">Loading more…</td>
+</tr>
+{% endif %}

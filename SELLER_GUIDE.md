@@ -8,12 +8,35 @@ Is repo me teen hisse hain:
 | **License server** (`license_server/`) | **Aap**, apne server par | Keys banana, activate, renew, block |
 | **Installer** (`installer/`) | Aap, apne PC par, ek baar har version par | `ExcelFinder-Setup-x.y.z.exe` banata hai |
 
-## Poora flow
+## Poora flow (simple: account + admin panel)
 ```
-Customer pay kare ──> Aap admin panel me license banao ──> Key (EXFN-XXXXX-...) customer ko bhejo
-Customer Setup.exe chalaye ──> admin account banaye ──> License page par key daale ──> app chalu
-App roz (online ho toh) license server se check karta hai ──> aap revoke / renew karo toh agle check par lagu
+Aap Setup.exe Google Drive par daalo ──> Customer download karke install kare
+Customer app kholta hai ──> naam + email + password se ACCOUNT banata hai   (internet chahiye)
+Aap license server ke admin panel > "Accounts (customers)" me naya user dekhte ho ("Waiting for approval")
+Aap plan dete ho: Monthly / Yearly / Lifetime  (ek click)  ──> customer ka app 5 minute me khul jata hai
+Baad me: "Block" se rok sakte ho, plan badal / renew kar sakte ho
 ```
+Key (`EXFN-...`) wala purana tareeka bhi chalta hai (admin panel > Licenses), par ab zaruri nahi.
+
+### Roz ke kaam (license server admin panel)
+| Kaam | Kahan |
+|---|---|
+| Naya customer dikhna | **Accounts (customers)**: "Waiting for approval" |
+| Monthly / Yearly / Lifetime dena ya renew | Checkbox tick, Action: **Give MONTHLY / YEARLY / LIFETIME access**, Run. Ya list me "License type" dropdown badlo aur Save |
+| Customer ka access rokna | Action: **Block selected accounts** (wapas: Unblock) |
+| Password bhool gaya | Action: **Set a new temporary password** (naya password ek baar dikhta hai, customer ko bhej do) |
+| Dusre PC par chalana | Account kholo, "PCs" me purane PC ka `active` untick; ya "Max machines" badhao |
+
+Monthly = 30 din, Yearly = 365 din, Lifetime = kabhi nahi. Renew karne par bacha hua time nahi jata.
+
+### Naya version dena (git push ke baad)
+`git push` apne aap customers tak nahi pahunchta: app ek installed program hai. Tareeka:
+1. `search/version.py` me `VERSION` badlo (jaise `1.1.0`), code `git push` karo.
+2. Windows par `installer\build_windows.ps1 ...` chalao. Ant me **SHA-256** dikhta hai.
+3. Nayi `ExcelFinder-Setup-1.1.0.exe` Google Drive par daalo, "Anyone with the link" share karo, link copy karo.
+4. License server admin panel > **App releases > Add**: version `1.1.0`, link, SHA-256, notes. Save.
+5. Customers ke app me (roz ek baar, ya "Check for updates" par) banner aata hai: **Update now**. Dabate hi app naya Setup download karta hai, SHA-256 se jaanchta hai, khud band hokar install hota hai aur wapas khulta hai. **Data nahi jata.**
+SHA-256 khali chhodoge toh sirf "Download" link dikhega (ek-click update nahi).
 
 ## Ek baar ka setup
 1. **Key jodi banao** (private + public): `python manage.py keygen --write --settings=license_server.server_settings`. Private key ka **backup** lo (`license_server/private_key.txt`). Isse kho diya toh sab customers ko naya installer dena padega.

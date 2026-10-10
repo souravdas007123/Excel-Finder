@@ -35,7 +35,16 @@ class LicenseAdmin(admin.ModelAdmin):
             path("check/", wrap(self._action(lambda r: service.check_now())), name="licensing_check"),
             path("deactivate/", wrap(self._action(lambda r: service.deactivate())), name="licensing_deactivate"),
             path("trial/", wrap(self._action(lambda r: service.start_trial())), name="licensing_trial"),
+            path("login/", wrap(self._action(lambda r: service.login(r.POST.get("email", ""), r.POST.get("password", "")))),
+                 name="licensing_login"),
+            path("register/", wrap(self._action(self._register)), name="licensing_register"),
         ] + super().get_urls()
+
+    @staticmethod
+    def _register(request):
+        if request.POST.get("password", "") != request.POST.get("confirm", ""):
+            return service.Result(False, "The two passwords do not match.")
+        return service.register(request.POST.get("name", ""), request.POST.get("email", ""), request.POST.get("password", ""))
 
     @staticmethod
     def _action(run):
@@ -60,6 +69,8 @@ class LicenseAdmin(admin.ModelAdmin):
             "state": state,
             "enforced": service.enforced(),
             "has_license": bool(state.token or state.license_key),
+            "signed_in": bool(state.device_token),
+            "account_email": state.account_email,
             "key_hint": ("EXFN-•••••-•••••-•••••-" + state.license_key[-5:]) if state.license_key else "",
             "machine_short": machine_id()[:12],
             "machine_name": machine_name(),

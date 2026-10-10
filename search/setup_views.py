@@ -1,15 +1,25 @@
-"""Pehli baar chalane par admin account banane ka page (installed app ke liye: customer ko 'createsuperuser' nahi karna padta)."""
+"""Pehli baar chalane par account banane ka page (installed app ke liye: customer ko 'createsuperuser' nahi karna padta).
+
+Licensed (bechne wali) app me ye page customer ka ACCOUNT banata hai (naam + email + password): server par account banta
+hai (seller ke admin panel me dikhta hai) aur isi email / password se is PC ka login bhi ban jata hai. Seller plan deta hai.
+Development copy (license check band) me purana simple form: username + password.
+"""
 from django.contrib.auth import get_user_model, login, password_validation
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
+from licensing import service
 
-@require_http_methods(["GET", "POST"])
-def setup(request):
-    User = get_user_model()
-    if User.objects.exists():                 # account ban chuka: ye page band
-        return redirect("/admin/")
+
+def _finish(request, User, username, email, password):
+    user = User.objects.create_superuser(username=username, email=email, password=password)
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    return redirect("/app/")
+
+
+def _legacy(request, User):
     errors = []
     username = (request.POST.get("username", "") if request.method == "POST" else "admin").strip()
     if request.method == "POST":
@@ -24,7 +34,43 @@ def setup(request):
             except ValidationError as exc:
                 errors.extend(exc.messages)
         if not errors:
-            user = User.objects.create_superuser(username=username, email="", password=password)
-            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-            return redirect("/admin/")
-    return render(request, "setup.html", {"errors": errors, "username": username})
+            return _finish(request, User, username, "", password)
+    return render(request, "setup.html", {"errors": errors, "username": username, "account_mode": False})
+
+
+def _account(request, User):
+    posted = request.method == "POST"
+    mode = "signin" if (request.POST.get("mode") if posted else request.GET.get("mode")) == "signin" else "register"
+    errors = []
+    form = {"name": request.POST.get("name", "").strip(), "email": request.POST.get("email", "").strip().lower()} if posted else {}
+    if posted:
+        password, confirm = request.POST.get("password", ""), request.POST.get("confirm", "")
+        try:
+            validate_email(form["email"])
+        except ValidationError:
+            errors.append("Please enter a valid email address.")
+        if mode == "register":
+            if not form["name"]:
+                errors.append("Please enter your name.")
+            if password != confirm:
+                errors.append("The two passwords do not match.")
+            if not errors:
+                try:
+                    password_validation.validate_password(password, User(username=form["email"]))
+                except ValidationError as exc:
+                    errors.extend(exc.messages)
+        if not errors:
+            result = (service.register(form["name"], form["email"], password) if mode == "register"
+                      else service.login(form["email"], password))
+            if result.ok:
+                return _finish(request, User, form["email"][:150], form["email"], password)
+            errors.append(result.message)
+    return render(request, "setup.html", {"errors": errors, "form": form, "mode": mode, "account_mode": True})
+
+
+@require_http_methods(["GET", "POST"])
+def setup(request):
+    User = get_user_model()
+    if User.objects.exists():                 # account ban chuka: ye page band
+        return redirect("/app/")
+    return _account(request, User) if service.enforced() else _legacy(request, User)

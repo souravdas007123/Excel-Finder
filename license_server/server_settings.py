@@ -90,6 +90,7 @@ LICENSE_PRIVATE_KEY = os.environ.get("LICENSE_PRIVATE_KEY", "").strip()
 if not LICENSE_PRIVATE_KEY and (_HERE / "private_key.txt").exists():
     LICENSE_PRIVATE_KEY = (_HERE / "private_key.txt").read_text().strip()
 
+MONTHLY_DAYS = 30          # monthly plan kitne din ka
 YEARLY_DAYS = 365          # yearly license kitne din ka (pehli activation se)
 TRIAL_DAYS = 14            # free trial
 OFFLINE_GRACE_DAYS = 14    # server se bina check kiye app kitne din chal sakta hai

@@ -16,6 +16,7 @@ datas += [
     (os.path.join(ROOT, "templates"), "templates"),
     (os.path.join(ROOT, "fileindex", "templates"), os.path.join("fileindex", "templates")),
     (os.path.join(ROOT, "licensing", "templates"), os.path.join("licensing", "templates")),
+    (os.path.join(ROOT, "webui", "templates"), os.path.join("webui", "templates")),       # naya UI (htmx)
     (os.path.join(ROOT, "staticfiles"), "staticfiles"),        # python manage.py collectstatic ka output
 ]
 
@@ -24,10 +25,11 @@ datas += [
 hiddenimports = (
     collect_submodules("fileindex")        # migrations bhi
     + collect_submodules("licensing")
+    + collect_submodules("webui")           # views, urls, context, templatetags (naam se import hote hain)
     + collect_submodules("search")
     + collect_submodules("django.contrib")
     + ["search", "search.settings", "search.urls", "search.wsgi", "search.middleware", "search.setup_views",
-       "search.version", "licensing.middleware", "licensing.build_config",
+       "search.version", "licensing.middleware", "licensing.build_config", "webui.context", "webui.urls",
        "python_calamine", "waitress", "whitenoise", "whitenoise.middleware", "openpyxl", "cryptography",
        "cryptography.hazmat.primitives.asymmetric.ed25519"]
     + [m for m in ("xlrd",) if importlib.util.find_spec(m)]     # sirf agar installed ho (.xls ka purana reader, fallback)

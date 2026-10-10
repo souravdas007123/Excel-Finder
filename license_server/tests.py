@@ -34,7 +34,7 @@ PRIVATE, PUBLIC = protocol.generate_keypair()
 PC1, PC2, PC3 = ("a" * 64, "b" * 64, "c" * 64)
 
 
-@override_settings(LICENSE_PRIVATE_KEY=PRIVATE)
+@override_settings(LICENSE_PRIVATE_KEY=PRIVATE, PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"])   # tez tests
 class ServerTestCase(TestCase):
     def setUp(self):
         cache.clear()
@@ -375,3 +375,294 @@ class CommandTests(ServerTestCase):
         public = out.split("PUBLIC")[1].split("\n")[1].strip()
         token = protocol.sign_token({"v": 1, "x": 1}, private)
         self.assertEqual(protocol.verify_token(token, public)["x"], 1)
+
+
+# ------------------------------------------------------------------ accounts (email + password) aur seller ka plan dena
+class AccountTests(ServerTestCase):
+    EMAIL, PASSWORD = "ravi@example.com", "Str0ng-Pass-77"
+
+    def register(self, machine=PC1, **kw):
+        data = dict(name="Ravi", email=self.EMAIL, password=self.PASSWORD, machine_id=machine, machine_name="OFFICE-PC")
+        data.update(kw)
+        return self.call("register", **data)
+
+    def login(self, machine=PC1, **kw):
+        data = dict(email=self.EMAIL, password=self.PASSWORD, machine_id=machine, machine_name="OFFICE-PC")
+        data.update(kw)
+        return self.call("login", **data)
+
+    def check(self, device_token, machine=PC1, email=None):
+        return self.call("account_check", email=email or self.EMAIL, device_token=device_token, machine_id=machine)
+
+    def account(self):
+        return License.objects.get(customer_email=self.EMAIL)
+
+    def approved(self, plan="monthly"):
+        data = self.register().json()
+        core.set_plan(self.account(), plan)
+        return data["device_token"]
+
+    # --- sign up
+    def test_signup_creates_a_pending_account_without_access(self):
+        r = self.register()
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertTrue(data["ok"] and data["pending"])
+        self.assertNotIn("token", data)                      # plan nahi mila: signed token nahi
+        self.assertTrue(data["device_token"])
+        account = self.account()
+        self.assertEqual((account.license_type, account.state()), ("pending", "pending"))
+        self.assertNotIn(self.PASSWORD, account.password_hash)    # password hashed hai, seedha nahi rakha
+        self.assertTrue(account.password_hash.startswith("md5$"))      # (tests me tez hasher; asli server par pbkdf2)
+
+    def test_email_is_case_insensitive_and_unique(self):
+        self.register(email="Ravi@Example.com")
+        r = self.register(email="ravi@example.COM", machine=PC2)
+        self.assertEqual((r.status_code, r.json()["error"]), (409, "email_exists"))
+        self.assertEqual(License.objects.filter(password_hash__gt="").count(), 1)
+
+    def test_bad_email_and_weak_password_are_refused(self):
+        self.assertEqual(self.register(email="not-an-email").json()["error"], "bad_email")
+        for weak in ("short", "password", "12345678"):
+            r = self.register(password=weak)
+            self.assertEqual((r.status_code, r.json()["error"]), (400, "weak_password"), weak)
+        self.assertFalse(License.objects.filter(password_hash__gt="").exists())
+
+    def test_pending_account_check_stays_pending_until_seller_acts(self):
+        token = self.register().json()["device_token"]
+        data = self.check(token).json()
+        self.assertTrue(data["ok"] and data["pending"])
+        self.assertNotIn("token", data)
+
+    # --- seller plan deta hai
+    def test_seller_gives_monthly_and_the_app_gets_a_30_day_token(self):
+        token = self.approved("monthly")
+        data = self.check(token).json()
+        self.assertTrue(data["ok"])
+        status = protocol.evaluate(data["token"], PUBLIC, PC1)
+        self.assertEqual((status.ok, status.license_type), (True, "monthly"))
+        self.assertAlmostEqual(status.days_left, 30, delta=1)
+
+    def test_yearly_and_lifetime_plans(self):
+        token = self.approved("yearly")
+        self.assertAlmostEqual(protocol.evaluate(self.check(token).json()["token"], PUBLIC, PC1).days_left, 365, delta=1)
+        core.set_plan(self.account(), "lifetime")
+        status = protocol.evaluate(self.check(token).json()["token"], PUBLIC, PC1)
+        self.assertEqual((status.license_type, status.expires), ("lifetime", None))
+
+    def test_renewing_adds_to_the_remaining_time(self):
+        self.approved("monthly")
+        account = self.account()
+        first_end = account.expires_at
+        core.set_plan(account, "monthly")
+        self.assertAlmostEqual((self.account().expires_at - first_end).days, 30, delta=1)
+
+    def test_changing_plan_starts_the_new_plan_from_today(self):
+        self.approved("yearly")
+        core.set_plan(self.account(), "monthly")
+        self.assertAlmostEqual((self.account().expires_at - timezone.now()).days, 30, delta=1)
+
+    def test_expired_monthly_account_is_refused_then_works_after_renewal(self):
+        token = self.approved("monthly")
+        License.objects.filter(pk=self.account().pk).update(expires_at=timezone.now() - timedelta(days=1))
+        r = self.check(token)
+        self.assertEqual((r.status_code, r.json()["error"]), (403, "expired"))
+        core.set_plan(self.account(), "monthly")
+        self.assertTrue(self.check(token).json()["ok"])
+
+    def test_block_stops_the_account_and_a_plan_does_not_unblock_it(self):
+        token = self.approved("yearly")
+        License.objects.filter(pk=self.account().pk).update(revoked=True, revoked_reason="Chargeback")
+        self.assertEqual(self.check(token).json()["error"], "revoked")
+        core.set_plan(self.account(), "yearly")
+        self.assertEqual(self.check(token).json()["error"], "revoked")
+        self.assertEqual(self.login().json()["error"], "revoked")
+
+    # --- login
+    def test_login_on_the_same_pc_works_after_approval(self):
+        self.approved("yearly")
+        data = self.login().json()
+        self.assertTrue(data["ok"] and data["token"] and data["device_token"])
+        self.assertEqual(data["account"]["email"], self.EMAIL)
+
+    def test_wrong_password_and_unknown_email_look_the_same(self):
+        self.register()
+        a = self.login(password="wrong-password-1")
+        b = self.login(email="nobody@example.com")
+        self.assertEqual((a.status_code, a.json()["error"]), (401, "bad_login"))
+        self.assertEqual((b.status_code, b.json()["error"], b.json()["message"]), (401, "bad_login", a.json()["message"]))
+
+    def test_too_many_wrong_passwords_lock_the_account_for_a_while(self):
+        self.register()
+        for _ in range(core.LOGIN_FAIL_LIMIT):
+            self.assertEqual(self.login(password="wrong-password-1").json()["error"], "bad_login")
+        r = self.login()                                    # sahi password bhi ab nahi chalega
+        self.assertEqual((r.status_code, r.json()["error"]), (429, "too_many_attempts"))
+        cache.clear()
+        self.assertTrue(self.login().json()["ok"])
+
+    # --- PC limit aur device secret
+    def test_second_pc_is_refused_until_the_first_signs_out(self):
+        token = self.approved("yearly")
+        r = self.login(machine=PC2)
+        self.assertEqual((r.status_code, r.json()["error"]), (409, "machine_limit"))
+        self.assertTrue(self.call("logout", email=self.EMAIL, device_token=token, machine_id=PC1).json()["deactivated"])
+        self.assertTrue(self.login(machine=PC2).json()["ok"])
+        self.assertEqual(self.check(token).json()["error"], "not_activated")      # purana PC ab band
+
+    def test_seller_can_allow_two_pcs(self):
+        self.approved("yearly")
+        License.objects.filter(pk=self.account().pk).update(max_machines=2)
+        self.assertTrue(self.login(machine=PC2).json()["ok"])
+
+    def test_device_secret_is_required_and_pc_specific(self):
+        token = self.approved("yearly")
+        self.assertEqual(self.check("wrong-secret").json()["error"], "not_activated")
+        self.assertEqual(self.check("").json()["error"], "not_activated")
+        self.assertEqual(self.check(token, machine=PC2).json()["error"], "not_activated")
+        self.assertEqual(self.check(token, email="other@example.com").json()["error"], "not_activated")
+        self.assertTrue(self.check(token).json()["ok"])
+
+    def test_logout_with_a_wrong_secret_does_nothing(self):
+        token = self.approved("yearly")
+        self.assertFalse(self.call("logout", email=self.EMAIL, device_token="nope", machine_id=PC1).json()["deactivated"])
+        self.assertTrue(self.check(token).json()["ok"])
+
+    def test_token_from_one_pc_does_not_work_on_another(self):
+        token = self.approved("yearly")
+        data = self.check(token).json()
+        self.assertEqual(protocol.evaluate(data["token"], PUBLIC, PC2).code, "wrong_machine")
+
+    def test_license_keys_still_work_next_to_accounts(self):
+        lic, key = self.make()
+        self.assertTrue(self.activate(key).json()["ok"])
+
+
+class AccountAdminTests(ServerTestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = get_user_model().objects.create_superuser("boss", "b@example.com", "pw")
+        self.client.force_login(self.admin)
+        self.call("register", name="Ravi", email="ravi@example.com", password="Str0ng-Pass-77", machine_id=PC1)
+        self.account = License.objects.get(customer_email="ravi@example.com")
+        self.url = reverse("admin:license_server_account_changelist")
+
+    def act(self, action):
+        return self.client.post(self.url, {"action": action, "_selected_action": [str(self.account.pk)]}, follow=True)
+
+    def test_accounts_list_shows_who_is_waiting(self):
+        r = self.client.get(self.url)
+        self.assertContains(r, "ravi@example.com")
+        self.assertContains(r, "Waiting for approval")
+
+    def test_accounts_and_keys_are_in_separate_lists(self):
+        self.make()
+        self.assertNotContains(self.client.get(reverse("admin:license_server_license_changelist")), "ravi@example.com")
+        self.assertNotContains(self.client.get(self.url), "Ravi Traders")
+
+    def test_give_monthly_yearly_lifetime_actions(self):
+        self.act("give_monthly")
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.license_type, "monthly")
+        self.assertAlmostEqual((self.account.expires_at - timezone.now()).days, 30, delta=1)
+        self.act("give_yearly")
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.license_type, "yearly")
+        self.assertAlmostEqual((self.account.expires_at - timezone.now()).days, 365, delta=1)
+        self.act("give_lifetime")
+        self.account.refresh_from_db()
+        self.assertEqual((self.account.license_type, self.account.expires_at), ("lifetime", None))
+
+    def test_changing_the_plan_in_the_list_sets_the_dates(self):
+        prefix = "form-0-"
+        r = self.client.post(self.url, {
+            "form-TOTAL_FORMS": "1", "form-INITIAL_FORMS": "1", "form-MIN_NUM_FORMS": "0", "form-MAX_NUM_FORMS": "1000",
+            prefix + "id": str(self.account.pk), prefix + "license_type": "yearly", "_save": "Save"}, follow=True)
+        self.assertEqual(r.status_code, 200)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.license_type, "yearly")
+        self.assertAlmostEqual((self.account.expires_at - timezone.now()).days, 365, delta=1)
+
+    def test_block_and_unblock(self):
+        self.act("revoke_selected")
+        self.account.refresh_from_db()
+        self.assertTrue(self.account.revoked)
+        self.act("unrevoke_selected")
+        self.account.refresh_from_db()
+        self.assertFalse(self.account.revoked)
+
+    def test_reset_password_shows_a_new_one_once_and_it_works(self):
+        r = self.act("reset_password")
+        self.assertContains(r, "New password for ravi@example.com")
+        self.account.refresh_from_db()
+        self.assertFalse(core.check_password("Str0ng-Pass-77", self.account.password_hash))
+        import re
+        new_password = re.search(r"<code[^>]*>([^<]+)</code>", r.content.decode()).group(1)
+        self.assertTrue(self.call("login", email="ravi@example.com", password=new_password, machine_id=PC1).json()["pending"])
+
+    def test_reset_password_clears_a_lockout(self):
+        for _ in range(core.LOGIN_FAIL_LIMIT):
+            self.call("login", email="ravi@example.com", password="wrong-password-1", machine_id=PC1)
+        new_password = core.set_password(self.account)
+        self.assertTrue(self.call("login", email="ravi@example.com", password=new_password, machine_id=PC1).json()["ok"])
+
+    def test_admin_cannot_add_accounts_by_hand(self):
+        self.assertEqual(self.client.get(reverse("admin:license_server_account_add")).status_code, 403)
+
+    def test_account_page_opens(self):
+        r = self.client.get(reverse("admin:license_server_account_change", args=[self.account.pk]))
+        self.assertEqual(r.status_code, 200)
+
+
+# ------------------------------------------------------------------ app updates (seller 'App releases' me version daalta hai)
+class ReleaseTests(ServerTestCase):
+    def release(self, version="1.1.0", **kw):
+        from .models import AppRelease
+        data = dict(version=kw.pop("version", version), download_url="https://drive.google.com/file/d/ABC123/view?usp=sharing",
+                    sha256="a" * 64, notes="Faster scans\nBug fixes")
+        data.update(kw)
+        release = AppRelease(**data)
+        release.full_clean()
+        release.save()
+        return release
+
+    def latest(self):
+        return self.client.get("/api/v1/latest")
+
+    def test_no_release_yet(self):
+        self.assertEqual(self.latest().json(), {"none": True})
+
+    def test_latest_published_version_wins_by_number_not_by_date(self):
+        self.release("1.9.0")
+        self.release("1.10.0")
+        self.release("2.0.0", published=False)
+        data = self.latest().json()
+        self.assertEqual(data["version"], "1.10.0")
+        self.assertEqual(data["notes"], ["Faster scans", "Bug fixes"])
+        self.assertEqual(data["sha256"], "a" * 64)
+
+    def test_manifest_passes_the_apps_own_validator(self):
+        from search import update_check
+        self.release("1.1.0", min_version="1.0.0")
+        clean = update_check.validate_manifest(self.latest().json())
+        self.assertEqual((clean["version"], clean["min_version"]), ("1.1.0", "1.0.0"))
+
+    def test_bad_input_is_rejected_in_the_admin_form(self):
+        from django.core.exceptions import ValidationError
+        for bad in (dict(version="one"), dict(download_url="http://example.com/a.exe"), dict(sha256="xyz"),
+                    dict(min_version="old")):
+            with self.assertRaises(ValidationError, msg=str(bad)):
+                self.release(**{"version": "3.0.0", **bad})
+
+    def test_release_admin_pages_open(self):
+        admin_user = get_user_model().objects.create_superuser("boss", "b@example.com", "pw")
+        self.client.force_login(admin_user)
+        self.release()
+        self.assertContains(self.client.get(reverse("admin:license_server_apprelease_changelist")), "1.1.0")
+        self.assertEqual(self.client.get(reverse("admin:license_server_apprelease_add")).status_code, 200)
+
+    def test_latest_is_rate_limited(self):
+        with override_settings(RATE_LIMIT_PER_MINUTE=2):
+            codes = [self.latest().status_code for _ in range(4)]
+        self.assertEqual(codes[:2], [200, 200])
+        self.assertEqual(codes[-1], 429)

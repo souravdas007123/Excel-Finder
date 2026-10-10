@@ -9,6 +9,7 @@ admin.site.index_title = "Licenses and activations"
 
 urlpatterns = [
     path("api/v1/ping", views.ping),
+    path("api/v1/latest", views.latest),
     path("api/v1/<str:action>", views.api),
     path("", admin.site.urls),
 ]

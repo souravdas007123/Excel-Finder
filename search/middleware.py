@@ -32,7 +32,7 @@ class UpdateCheckMiddleware:
 
     def __call__(self, request):
         user = getattr(request, "user", None)
-        if request.method == "GET" and request.path.startswith("/admin/") and user is not None \
+        if request.method == "GET" and request.path.startswith(("/admin/", "/app/")) and user is not None \
                 and user.is_authenticated and user.is_staff:
             from . import update_check
             update_check.maybe_background_check()

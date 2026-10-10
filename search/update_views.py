@@ -1,8 +1,9 @@
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
+from django.http import JsonResponse
 from django.shortcuts import redirect
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from . import update_check
 
@@ -29,3 +30,16 @@ def check(request):
 def dismiss(request):
     update_check.dismiss(request.POST.get("version", ""))
     return _back(request)
+
+
+@staff_member_required
+@require_POST
+def install(request):
+    result = update_check.start_install()
+    return JsonResponse({"ok": result.ok, "message": result.message})
+
+
+@staff_member_required
+@require_GET
+def status(request):
+    return JsonResponse(update_check.install_status())

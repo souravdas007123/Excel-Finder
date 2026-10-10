@@ -1,0 +1,30 @@
+{% load webui_tags %}{% for r in items %}
+<details class="num">
+    <summary>
+        <span class="n">{{ r.number }}</span>
+        {% if r.found %}<span class="pill ok">Found</span>{% else %}<span class="pill bad">Not found</span>{% endif %}
+        <span class="meta">{% if r.found %}{{ r.total|comma }} match{{ r.total|pluralize:",es" }} in {{ r.file_count|comma }} file{{ r.file_count|pluralize }}{% else %}Not in any indexed file{% endif %}</span>
+    </summary>
+    {% if r.matches %}
+    <div class="hits">
+        {% for m in r.matches %}
+        <div class="hit">
+            <div style="min-width:0">
+                <div class="fname">{{ m.file }}</div>
+                <div class="where">{{ m.folder }}</div>
+                <div class="where">Sheet <b>{{ m.sheet|default:"—" }}</b> · row <b>{{ m.row }}</b>{% if m.column %} · column <b>{{ m.column }}</b>{% endif %}{% if m.stored %} · written as <span class="mono">{{ m.stored }}</span>{% endif %}</div>
+            </div>
+            <div class="acts">
+                <button type="button" class="btn btn-sm" hx-get="{% url 'webui:search_row' %}?file_id={{ m.file_id }}&sheet={{ m.sheet|urlencode }}&row={{ m.row }}&col={{ m.col }}" hx-target="#modal-body">View row</button>
+                <button type="button" class="btn btn-sm btn-ghost" data-copy="{{ m.path }}" title="Copy full path">{% icon "copy" 14 %}</button>
+            </div>
+        </div>
+        {% endfor %}
+        {% if r.total > r.matches|length %}<div class="hint" style="margin-top:8px">Showing {{ r.matches|length }} of {{ r.total|comma }} matches. Export the Excel report for all of them.</div>{% endif %}
+    </div>
+    {% endif %}
+</details>
+{% endfor %}
+{% if has_more %}
+<div class="more-row" hx-get="{% url 'webui:search_tab' token 'numbers' %}?page={{ next_page }}&q={{ q|urlencode }}&filter={{ filter }}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this"><span class="hint">Loading more…</span></div>
+{% endif %}
