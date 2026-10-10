@@ -1,5 +1,5 @@
 {% load webui_tags %}
-<div id="license-panel" class="stack"{% if status.code == "pending" %} hx-get="{% url 'webui:license_panel' %}?from=pending" hx-trigger="every 30s" hx-swap="outerHTML"{% endif %}>
+<div id="license-panel" class="stack">
 {% if not enforced %}
     <div class="alert info">{% icon "info" 18 %}<div class="grow"><b>License checks are switched off in this copy</b> (development build). Nothing below is required.</div></div>
 {% endif %}
@@ -10,49 +10,52 @@
                 <div class="row" style="gap:12px">
                     {% if not enforced %}<span class="pill">Not enforced</span>
                     {% elif status.ok %}<span class="pill ok">Active</span>
-                    {% elif status.code == "pending" %}<span class="pill warn">Waiting for approval</span>
-                    {% else %}<span class="pill bad">{% if status.code == "expired" %}Expired{% elif status.code == "revoked" %}Disabled{% elif status.code == "unlicensed" %}Not signed in{% else %}Blocked{% endif %}</span>{% endif %}
+                    {% else %}<span class="pill {% if status.code == 'unlicensed' %}warn{% else %}bad{% endif %}">{% if status.code == "expired" %}Expired{% elif status.code == "revoked" %}Cancelled{% elif status.code == "unlicensed" %}Key needed{% else %}Blocked{% endif %}</span>{% endif %}
                     {% if status.type_label %}<b style="font-size:18px">{{ status.type_label }}</b>{% endif %}
                 </div>
-                <p style="margin-top:10px;{% if status.code == 'pending' or status.warn %}color:var(--warn);{% elif not status.ok %}color:var(--bad);{% endif %}font-weight:{% if status.ok and not status.warn %}400{% else %}600{% endif %}">{% if status.warn %}{{ status.warn }}{% else %}{{ status.message }}{% endif %}</p>
-                {% if status.code == "pending" %}<p class="hint" style="margin-top:6px">Nothing more to do here. This page refreshes by itself and the app opens as soon as the seller gives you access.{% if support %} Questions? <b>{{ support }}</b>.{% endif %}</p>{% endif %}
+                <p style="margin-top:10px;{% if status.warn or status.code == 'unlicensed' %}color:var(--warn);{% elif not status.ok %}color:var(--bad);{% endif %}font-weight:{% if status.ok and not status.warn %}400{% else %}600{% endif %}">{% if status.warn %}{{ status.warn }}{% else %}{{ status.message }}{% endif %}</p>
             </div>
-            {% if can_manage and has_license or can_manage and signed_in %}
+            {% if can_manage and has_license %}
             <button type="button" class="btn" hx-post="{% url 'webui:license_check' %}" hx-target="#license-panel" hx-swap="outerHTML">{% icon "refresh" 15 %} <span class="spin"></span> Check now</button>
             {% endif %}
         </div>
 
-        {% if has_license or signed_in %}
+        {% if has_license or account_email %}
         <dl class="kv">
-            {% if account_email %}<dt>Account</dt><dd>{{ account_email }}</dd>{% endif %}
+            {% if account_email %}<dt>Registered as</dt><dd>{{ account_name }} &lt;{{ account_email }}&gt;</dd>{% endif %}
             {% if status.customer %}<dt>Licensed to</dt><dd>{{ status.customer }}</dd>{% endif %}
             {% if status.license_type %}<dt>Valid until</dt><dd>{% if status.expires %}{{ status.expires|date:"d M Y" }}{% if status.days_left is not None %} · {{ status.days_left }} day{{ status.days_left|pluralize }} left{% endif %}{% else %}Never (lifetime){% endif %}</dd>{% endif %}
             {% if key_hint %}<dt>License key</dt><dd><code>{{ key_hint }}</code></dd>{% endif %}
             <dt>This PC</dt><dd>{{ machine_name }} · <code>{{ machine_short }}</code></dd>
+            {% if has_license %}
             <dt>Last checked</dt><dd>{% if state.last_check_at %}{{ state.last_check_at|date:"d M Y, H:i" }} ({{ state.last_check_at|timeago }}){% else %}Not yet{% endif %}{% if not state.last_check_ok and state.last_error %}<div class="hint">Last attempt failed: {{ state.last_error }}</div>{% endif %}</dd>
             {% if status.check_by %}<dt>Verify online before</dt><dd>{{ status.check_by|date:"d M Y" }} <span class="hint">(checked automatically once a day while online)</span></dd>{% endif %}
+            {% endif %}
         </dl>
         {% endif %}
     </div>
 
-    {% if enforced and can_manage and not signed_in %}
-    <div class="card" style="max-width:520px">
-        <div class="card-head"><h2>{% icon "user" 18 %} Sign in to your account</h2></div>
-        <form class="stack" style="gap:12px" hx-post="{% url 'webui:license_login' %}" hx-target="#license-panel" hx-swap="outerHTML">
-            <input type="email" name="email" placeholder="Email" autocomplete="username" required aria-label="Email">
-            <input type="password" name="password" placeholder="Password" autocomplete="current-password" required aria-label="Password">
-            <button class="btn btn-primary" type="submit"><span class="spin"></span> Sign in</button>
+    {% if enforced and can_manage and not status.ok %}
+    <div class="card" style="max-width:640px">
+        <div class="card-head"><h2>{% icon "shield" 18 %} Activate your license</h2></div>
+        <form class="row" hx-post="{% url 'webui:license_activate' %}" hx-target="#license-panel" hx-swap="outerHTML">
+            <input class="grow mono" type="text" name="key" placeholder="EXFN-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" spellcheck="false" required aria-label="License key" style="flex:1">
+            <button class="btn btn-primary" type="submit"><span class="spin"></span> Activate</button>
         </form>
-        <p class="hint" style="margin-top:12px">Use the email and password you created when you first opened Excel Finder.Forgot the password, or no account yet? Contact the seller{% if support %} at <b>{{ support }}</b>{% endif %}.{% if buy_url %} <a href="{{ buy_url }}" target="_blank" rel="noopener">Buy or renew</a>.{% endif %}</p>
+        <p class="hint" style="margin-top:12px;line-height:1.7">
+            {% if status.code == "unlicensed" %}<b>Don't have a key yet?</b> Email the seller{% if support %} at <b>{{ support }}</b>{% endif %} and ask for one. Mention your name{% if account_email %} (<b>{{ account_name }}</b>) and email (<b>{{ account_email }}</b>){% endif %}: the key is sent to that email.
+            {% else %}Enter your current key, or ask the seller{% if support %} (<b>{{ support }}</b>){% endif %} to renew or fix your license.{% endif %}
+            {% if buy_url %}<a href="{{ buy_url }}" target="_blank" rel="noopener">Buy or renew</a>.{% endif %}
+        </p>
     </div>
     {% endif %}
 
-    {% if can_manage and signed_in %}
+    {% if can_manage and has_license %}
     <div class="card">
         <details>
-            <summary style="cursor:pointer;font-weight:600">Use this account on another PC</summary>
-            <p class="hint" style="margin:12px 0">Signing out frees your account so you can sign in on a different computer. This PC will stop working until you sign in again. Your indexed data is not deleted.</p>
-            <button type="button" class="btn btn-danger" hx-post="{% url 'webui:license_signout' %}" hx-target="#license-panel" hx-swap="outerHTML">Sign out of this PC</button>
+            <summary style="cursor:pointer;font-weight:600">Move this license to another PC</summary>
+            <p class="hint" style="margin:12px 0">One license works on one PC. Deactivating frees it so you can activate the same key on a different computer. This PC will stop working until you activate it again. Your indexed data is not deleted.</p>
+            <button type="button" class="btn btn-danger" hx-post="{% url 'webui:license_deactivate' %}" hx-target="#license-panel" hx-swap="outerHTML">Deactivate this PC</button>
         </details>
     </div>
     {% endif %}
@@ -67,6 +70,6 @@
 
     <div class="card">
         <div class="card-head"><h2>{% icon "info" 18 %} What the license check sends</h2></div>
-        <p class="hint" style="line-height:1.7">To verify your license, this app contacts <code>{{ server_url|default:"the license server" }}</code> and sends only your <b>account email</b> (or license key), this <b>PC&rsquo;s anonymous ID</b> and <b>name</b>, the <b>app version</b> ({{ version }}), and two <b>counters</b> (how many searches and scans were run: {{ state.searches_total }} and {{ state.scans_total }} so far).<br><b>It never sends your Excel files, file names, folder paths or the numbers you search.</b> All of that stays on this PC.{% if support %}<br>Need help? Contact <b>{{ support }}</b>.{% endif %}</p>
+        <p class="hint" style="line-height:1.7">To verify your license, this app contacts <code>{{ server_url|default:"the license server" }}</code> and sends only your <b>license key</b>, this <b>PC&rsquo;s anonymous ID</b> and <b>name</b>, the <b>app version</b> ({{ version }}), and three <b>counters</b>: how many searches and scans were run ({{ state.searches_total }} and {{ state.scans_total }} so far) and how many Excel files are in your index. When you first register, your <b>name and email</b> are sent too. Your app password never leaves this PC.<br><b>It never sends your Excel files, file names, folder paths or the numbers you search.</b> All of that stays on this PC.{% if support %}<br>Need help? Contact <b>{{ support }}</b>.{% endif %}</p>
     </div>
 </div>

@@ -24,7 +24,7 @@
             <div><label class="field" for="id_password">Password</label>{{ form.password }}</div>
             <button class="btn btn-primary btn-lg" type="submit">Sign in</button>
         </form>
-        <p class="hint" style="margin-top:18px">Forgot your password? Contact the seller of this app.</p>
+        <p class="hint" style="margin-top:18px">{% if enforced %}Forgot your password? <a href="{% url 'webui:forgot' %}">Reset it with a code from the seller</a>.{% else %}Forgot your password? Ask the person who installed this app.{% endif %}</p>
     </div>
 </div>
 </body>

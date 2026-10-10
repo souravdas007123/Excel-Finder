@@ -1,15 +1,14 @@
 """Naya UI (/app/): login, dashboard, indexed files, scan history. Search / scan / license alag files me."""
-import os
 import re
 
 from django.conf import settings
-from django.contrib.auth import login as auth_login, logout as auth_logout
+from django.contrib.auth import get_user_model, login as auth_login, logout as auth_logout, password_validation
 from django.contrib.auth.forms import AuthenticationForm
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
@@ -59,7 +58,38 @@ def login_view(request):
             auth_login(request, form.get_user())
             safe = url_has_allowed_host_and_scheme(nxt, allowed_hosts={request.get_host()}, require_https=request.is_secure())
             return redirect(nxt if safe and nxt else "webui:dashboard")
-    return render(request, "webui/login.html", {"form": form, "next": nxt})
+    return render(request, "webui/login.html", {"form": form, "next": nxt, "enforced": license_service.enforced()})
+
+
+@require_http_methods(["GET", "POST"])
+def forgot_password(request):
+    """Password bhool gaye: seller ka diya ek baar chalne wala code + naya password. Password sirf is PC par badalta hai."""
+    enforced = license_service.enforced()
+    form = {"email": request.POST.get("email", "").strip().lower(), "code": request.POST.get("code", "").strip()}
+    errors = []
+    if request.method == "POST" and enforced:
+        User = get_user_model()
+        new, confirm = request.POST.get("password", ""), request.POST.get("confirm", "")
+        user = User.objects.filter(username__iexact=form["email"]).first() or User.objects.filter(email__iexact=form["email"]).first()
+        if not form["email"] or not form["code"]:
+            errors.append("Please enter your email and the reset code.")
+        elif user is None:
+            errors.append("No user with this email exists on this PC.")
+        elif new != confirm:
+            errors.append("The two passwords do not match.")
+        else:
+            try:
+                password_validation.validate_password(new, user)
+            except ValidationError as exc:
+                errors.extend(exc.messages)
+        if not errors:
+            result = license_service.reset_password_code_ok(form["email"], form["code"])    # code yahin kharch hota hai
+            if result.ok:
+                user.set_password(new)
+                user.save(update_fields=["password"])
+                return render(request, "webui/forgot_done.html")
+            errors.append(result.message)
+    return render(request, "webui/forgot.html", {"form": form, "errors": errors, "enforced": enforced})
 
 
 @require_POST

@@ -43,13 +43,12 @@ server {
 ```
 **HTTPS zaruri hai** (license key network par jati hai). App http address ko maanti hi nahi (sirf 127.0.0.1 testing ke liye).
 
-## 3a. Customer accounts aur updates (admin panel)
-Admin panel (`/`) me teen hisse hain:
-* **Accounts (customers):** jo customer app me email + password se account banata hai wo yahan "Waiting for approval" dikhta hai. Plan do (Give MONTHLY / YEARLY / LIFETIME), block karo, password reset karo. Customer ka app plan milne ke 5 minute ke andar khud khul jata hai.
+## 3a. Customers, keys aur updates (admin panel)
+Admin panel (`/`) me do hisse hain:
+* **Licenses:** jo customer app me naam + email deta hai wo yahan "Waiting for key" dikhta hai. **Generate key: Monthly / Yearly / Lifetime** se key banao (ek baar dikhti hai, customer ko email karo). Yahin dikhta hai plan, status, expiry, PC (1/1), files indexed, searches. Actions: Renew (+30 / +365 din), CANCEL, Free the PC, Password reset code.
 * **App releases:** naya version (version, Setup.exe ka https link, SHA-256, notes). Customers ke app me "Update now" aata hai. API: `GET /api/v1/latest`.
-* **Licenses:** purane key (`EXFN-...`) wale licenses.
 
-Account ke liye API: `register`, `login`, `account_check`, `logout` (POST `/api/v1/<action>`). Password server par hashed rehta hai, galat password 6 baar ke baad 15 minute ke liye ruk jata hai. App password kabhi save nahi karta: login par server ek PC-specific secret deta hai.
+API (POST `/api/v1/<action>`): `register` (naam + email), `activate`, `check`, `deactivate`, `reset` (email + code). **Password server tak aata hi nahi**: app ka password sirf customer ke PC par rehta hai; reset code ek baar chalne wala hota hai (24 ghante), galat code 6 baar ke baad 15 minute ke liye ruk jata hai. Usage me sirf ginti jati hai (searches, scans, kitni files index me): koi file ka naam ya data nahi.
 
 ## 3. Roz ke kaam
 Admin panel ya commands (dono chalte hain):

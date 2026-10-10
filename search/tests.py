@@ -3,7 +3,6 @@
 Chalane ke liye:  python manage.py test search
 """
 import importlib.util
-import json
 import os
 import subprocess
 import sys
@@ -15,7 +14,6 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings
-from django.urls import reverse
 
 from licensing import protocol, service
 from . import middleware as first_run
@@ -32,39 +30,44 @@ def load_module(name, path):
 
 @override_settings(LICENSE_ENFORCED=True)
 class AccountSetupTests(TestCase):
-    """Bechne wali app: pehla page customer ka ACCOUNT banata hai (server par) aur wahi is PC ka login bhi hai."""
+    """Bechne wali app: pehla page naam + email + password leta hai. Naam + email seller ko jata hai, password sirf is PC par."""
 
     def setUp(self):
         first_run.reset_first_run_cache()
         self.addCleanup(first_run.reset_first_run_cache)
         self.register = mock.patch.object(service, "register", return_value=service.Result(True, "ok"))
-        self.signin = mock.patch.object(service, "login", return_value=service.Result(True, "ok"))
-        self.register_mock, self.login_mock = self.register.start(), self.signin.start()
+        self.register_mock = self.register.start()
         self.addCleanup(self.register.stop)
-        self.addCleanup(self.signin.stop)
 
     DATA = {"name": "Ravi", "email": "Ravi@Example.com", "password": "Str0ng-Pass-77", "confirm": "Str0ng-Pass-77"}
 
     def test_page_asks_for_name_email_and_password(self):
         r = self.client.get("/setup/")
-        self.assertContains(r, "Create your account")
+        self.assertContains(r, "Welcome to Excel Finder")
         for field in ('name="name"', 'name="email"', 'name="password"', 'name="confirm"'):
             self.assertContains(r, field)
+        self.assertContains(r, "never sent to the seller")
         self.assertNotContains(r, 'name="username"')
+        self.assertNotContains(r, "Sign in")
 
-    def test_signup_creates_the_server_account_and_the_local_login(self):
+    def test_signup_tells_the_seller_and_creates_the_local_login(self):
         r = self.client.post("/setup/", self.DATA)
         self.assertRedirects(r, "/app/", fetch_redirect_response=False)
-        self.register_mock.assert_called_once_with("Ravi", "ravi@example.com", "Str0ng-Pass-77")
+        self.register_mock.assert_called_once_with("Ravi", "ravi@example.com")        # password nahi jata
         user = get_user_model().objects.get()
         self.assertEqual((user.username, user.email, user.is_superuser), ("ravi@example.com", "ravi@example.com", True))
         self.assertTrue(user.check_password("Str0ng-Pass-77"))
         self.assertIn("_auth_user_id", self.client.session)          # seedha login ho gaya
 
+    def test_the_password_never_reaches_the_service(self):
+        self.client.post("/setup/", self.DATA)
+        for call in self.register_mock.call_args_list:
+            self.assertNotIn("Str0ng-Pass-77", str(call))
+
     def test_server_refusal_creates_no_local_user(self):
-        self.register_mock.return_value = service.Result(False, "An account with this email already exists.")
+        self.register_mock.return_value = service.Result(False, "Please enter a valid email address.")
         r = self.client.post("/setup/", self.DATA)
-        self.assertContains(r, "already exists")
+        self.assertContains(r, "valid email address")
         self.assertFalse(get_user_model().objects.exists())
 
     def test_offline_gives_a_clear_message_and_creates_nothing(self):
@@ -82,23 +85,16 @@ class AccountSetupTests(TestCase):
         self.register_mock.assert_not_called()
         self.assertFalse(get_user_model().objects.exists())
 
-    def test_existing_customer_can_sign_in_on_a_new_pc(self):
-        page = self.client.get("/setup/?mode=signin")
-        self.assertContains(page, "Sign in to Excel Finder")
-        self.assertNotContains(page, 'name="confirm"')
-        r = self.client.post("/setup/", {"mode": "signin", "email": "ravi@example.com", "password": "Str0ng-Pass-77"})
+    def test_reinstalling_with_the_same_email_just_works(self):
+        self.client.post("/setup/", self.DATA)
+        get_user_model().objects.all().delete()                    # naya install: local database khali
+        first_run.reset_first_run_cache()
+        self.client.logout()
+        r = self.client.post("/setup/", self.DATA)
         self.assertRedirects(r, "/app/", fetch_redirect_response=False)
-        self.login_mock.assert_called_once_with("ravi@example.com", "Str0ng-Pass-77")
-        self.register_mock.assert_not_called()
-        self.assertTrue(get_user_model().objects.filter(username="ravi@example.com").exists())
+        self.assertEqual(self.register_mock.call_count, 2)
 
-    def test_wrong_password_on_sign_in_creates_nothing(self):
-        self.login_mock.return_value = service.Result(False, "Wrong email or password.")
-        r = self.client.post("/setup/", {"mode": "signin", "email": "ravi@example.com", "password": "nope-nope-1"})
-        self.assertContains(r, "Wrong email or password")
-        self.assertFalse(get_user_model().objects.exists())
-
-    def test_setup_is_closed_once_an_account_exists(self):
+    def test_setup_is_closed_once_a_user_exists(self):
         get_user_model().objects.create_superuser("owner", "o@example.com", "Str0ng-Pass-77")
         r = self.client.post("/setup/", self.DATA)
         self.assertRedirects(r, "/app/", fetch_redirect_response=False)
@@ -111,7 +107,7 @@ class FirstRunSetupTests(TestCase):
         self.addCleanup(first_run.reset_first_run_cache)
 
     def test_every_page_goes_to_setup_while_there_is_no_user(self):
-        for path in ("/", "/admin/", "/admin/login/", "/admin/fileindex/bulksearch/"):
+        for path in ("/", "/admin/", "/admin/login/", "/app/", "/app/search/"):
             r = self.client.get(path)
             self.assertRedirects(r, "/setup/", fetch_redirect_response=False, msg_prefix=path)
         self.assertEqual(self.client.get("/setup/").status_code, 200)
