@@ -78,7 +78,7 @@ class AccountSetupTests(TestCase):
                        {"password": "password", "confirm": "password"}):
             r = self.client.post("/setup/", {**self.DATA, **change})
             self.assertEqual(r.status_code, 200, change)
-            self.assertContains(r, 'class="errors"')
+            self.assertContains(r, 'class="errorlist"')
         self.register_mock.assert_not_called()
         self.assertFalse(get_user_model().objects.exists())
 

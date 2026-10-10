@@ -16,7 +16,7 @@ from licensing import service
 def _finish(request, User, username, email, password):
     user = User.objects.create_superuser(username=username, email=email, password=password)
     login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-    return redirect("/admin/")
+    return redirect("/app/")
 
 
 def _legacy(request, User):
@@ -72,5 +72,5 @@ def _account(request, User):
 def setup(request):
     User = get_user_model()
     if User.objects.exists():                 # account ban chuka: ye page band
-        return redirect("/admin/")
+        return redirect("/app/")
     return _account(request, User) if service.enforced() else _legacy(request, User)

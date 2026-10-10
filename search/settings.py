@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'fileindex',  # Hamara custom app
     'licensing',  # License: key, expiry, block
+    'webui',      # Naya modern UI (/app/): htmx
 ]
 
 MIDDLEWARE = [
@@ -123,10 +124,14 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'search.context_processors.update_notice',
+                'webui.context.shell',
             ],
         },
     },
 ]
+
+LOGIN_URL = '/app/login/'
+LOGIN_REDIRECT_URL = '/app/'
 
 WSGI_APPLICATION = 'search.wsgi.application'
 

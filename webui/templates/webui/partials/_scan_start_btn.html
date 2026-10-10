@@ -1,0 +1,1 @@
+{% load webui_tags %}<button id="scan-start" type="submit" class="btn btn-primary btn-lg"{% if oob %} hx-swap-oob="true"{% endif %}{% if disabled %} disabled{% endif %}>{% icon "play" 16 %} <span class="spin"></span> {% if disabled %}Scanning…{% else %}Start scan{% endif %}</button>

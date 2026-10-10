@@ -9,7 +9,8 @@ admin.site.site_title = 'Excel Finder'
 admin.site.index_title = 'Welcome'
 
 urlpatterns = [
-    path('', RedirectView.as_view(url='/admin/')),
+    path('', RedirectView.as_view(url='/app/')),
+    path('app/', include('webui.urls')),
     path('setup/', setup_views.setup, name='setup'),
     path('admin/update/check/', update_views.check, name='update_check'),
     path('admin/update/install/', update_views.install, name='update_install'),

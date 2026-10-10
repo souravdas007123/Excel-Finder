@@ -1,0 +1,1 @@
+{% if status == "Completed" %}<span class="pill ok">Completed</span>{% elif status == "Running" %}<span class="pill accent run">Running</span>{% elif status == "Cancelled" %}<span class="pill warn">Stopped</span>{% else %}<span class="pill bad">{{ status }}</span>{% endif %}

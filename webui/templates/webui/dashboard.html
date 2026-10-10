@@ -1,0 +1,81 @@
+{% extends "webui/base.html" %}
+{% load webui_tags %}
+{% block title %}Dashboard | Excel Finder{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+{% block subheading %}<div class="sub">Your Excel files, searchable in seconds</div>{% endblock %}
+{% block content %}
+<div class="stack">
+    {% if running %}
+    <div class="alert info" role="status">{% icon "scan" 18 %}
+        <div class="grow"><b>A scan is running</b> — {{ running.files_indexed|comma }} files indexed so far.</div>
+        <a class="btn btn-sm btn-primary" href="{% url 'webui:scan' %}" {% navattrs %}>View progress</a>
+    </div>
+    {% endif %}
+
+    <div class="card hero">
+        <div>
+            <h2>{% if has_index %}Search your numbers{% else %}Let's get started{% endif %}</h2>
+            <p>{% if has_index %}Paste or upload a list of phone numbers and see which files and rows contain them.{% else %}First, scan a drive or folder so Excel Finder can learn what is inside your Excel files. Then search any list of numbers.{% endif %}</p>
+        </div>
+        <div class="row">
+            {% if has_index %}
+            <a class="btn btn-primary btn-lg" href="{% url 'webui:search' %}" {% navattrs %}>{% icon "search" %} Bulk search</a>
+            <a class="btn btn-lg" href="{% url 'webui:scan' %}" {% navattrs %}>{% icon "scan" %} Scan files</a>
+            {% else %}
+            <a class="btn btn-primary btn-lg" href="{% url 'webui:scan' %}" {% navattrs %}>{% icon "scan" %} Start your first scan</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div id="dash-stats" hx-get="{% url 'webui:dashboard_stats' %}" hx-trigger="load, indexChanged from:body" hx-swap="innerHTML">
+        <div class="grid cols-4">
+            {% for i in "1234" %}<div class="card stat"><div class="skeleton" style="width:50%;height:12px"></div><div class="skeleton"></div></div>{% endfor %}
+        </div>
+    </div>
+
+    <div class="grid split">
+        <div class="card">
+            <div class="card-head"><h2>{% icon "history" 18 %} Recent scans</h2><a class="btn btn-ghost btn-sm" href="{% url 'webui:history' %}" {% navattrs %}>View all</a></div>
+            {% if recent %}
+            <div class="table-wrap" style="border:0">
+                <table>
+                    <thead><tr><th>Scan</th><th>Status</th><th class="num">Indexed</th><th class="num">Unchanged</th><th class="num">Failed</th><th>When</th></tr></thead>
+                    <tbody>
+                    {% for t in recent %}
+                    <tr>
+                        <td>#{{ t.id }}</td>
+                        <td>{% include "webui/partials/_status_pill.html" with status=t.status %}</td>
+                        <td class="num">{{ t.files_indexed|comma }}</td><td class="num">{{ t.files_skipped|comma }}</td>
+                        <td class="num">{% if t.files_failed %}<span class="pill bad">{{ t.files_failed|comma }}</span>{% else %}0{% endif %}</td>
+                        <td class="muted">{{ t.created_at|timeago }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty">{% icon "history" 28 %}<b>No scans yet</b>Your scans will be listed here.</div>
+            {% endif %}
+        </div>
+
+        <div class="stack">
+            <div class="card">
+                <div class="card-head"><h2>{% icon "shield" 18 %} License</h2><a class="btn btn-ghost btn-sm" href="{% url 'webui:license' %}" {% navattrs %}>Manage</a></div>
+                {% if license_chip %}
+                <span class="pill {{ license_chip.tone }}">{{ license_chip.text }}</span>
+                <p class="hint" style="margin-top:8px">{{ license_chip.sub }}</p>
+                {% endif %}
+                {% if usage %}<p class="hint" style="margin-top:10px">Used so far: <b>{{ usage.searches_total|comma }}</b> searches &middot; <b>{{ usage.scans_total|comma }}</b> scans</p>{% endif %}
+            </div>
+            <div class="card">
+                <div class="card-head"><h2>{% icon "info" 18 %} How it works</h2></div>
+                <ol class="hint" style="margin:0;padding-left:18px;line-height:1.9">
+                    <li><b>Scan</b> a drive or folder once.</li>
+                    <li><b>Search</b> a list of numbers.</li>
+                    <li>See the <b>file, sheet and row</b> for each match, or export a report.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

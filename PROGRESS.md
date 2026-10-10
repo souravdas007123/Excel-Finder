@@ -5,6 +5,7 @@ Yahin se agle din kaam shuru karo. Branch: **`test`** (GitHub `souravdas007123/E
 
 ## Kya bana hai (sab `test` par, tests pass)
 * **App:** Excel files scan karke phone numbers ka index, bulk search, file + row detail, Excel export, Stop Scan, ETA.
+* **Naya modern UI (htmx) `/app/`:** Dashboard, Scan files, Bulk search, Indexed files, Scan history, License. Dark theme default (light toggle), htmx (local file, internet nahi chahiye), sab live (scan progress har second, search results tabs / filters / load-more, row detail popup). Code: `webui/` (views, templates, `static/webui/app.css`, `app.js`, `htmx.min.js`). Purana admin panel `/admin/` waisa hi hai (sidebar me "Admin panel" link). `/` ab `/app/` par jata hai.
 * **Accounts + plans (naya, simple):** customer app me naam + email + password se account banata hai; aap licence server admin panel > *Accounts (customers)* me Monthly / Yearly / Lifetime dete ho ya block karte ho. Purane key (`EXFN-...`) bhi chalte hain. Per-PC lock, offline grace 14 din. Licence server alag (`license_server/`).
 * **In-app update:** admin panel > *App releases* me naya version (Drive link + SHA-256) daalo, customer ke app me **Update now** aata hai.
 * **Windows installer:** `installer/build_windows.ps1` (PyInstaller + Inno Setup), pehli baar admin account banane ka `/setup/` page.

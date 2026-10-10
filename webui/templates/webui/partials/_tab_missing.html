@@ -1,0 +1,13 @@
+{% load webui_tags %}
+{% if total %}
+<div class="toolbar">
+    <span class="hint">{{ total|comma }} number{{ total|pluralize }} not found in any indexed file{% if total > items|length %} (showing the first {{ items|length|comma }}){% endif %}.</span>
+    <div class="row">
+        <button type="button" class="btn btn-sm" data-copy-from="#missing-text">{% icon "copy" 14 %} Copy all</button>
+        <button type="button" class="btn btn-sm" data-download="#missing-text" data-filename="not-found-numbers.txt">{% icon "download" 14 %} Download .txt</button>
+    </div>
+</div>
+<div class="missing-box">{{ text }}</div>
+{% else %}
+<div class="empty">{% icon "check" 28 %}<b>Every number was found</b>Nice: nothing is missing from your files.</div>
+{% endif %}

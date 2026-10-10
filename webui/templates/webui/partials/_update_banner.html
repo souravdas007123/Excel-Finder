@@ -1,0 +1,22 @@
+{% load webui_tags %}<div id="update-banner" class="banner"{% if oob %} hx-swap-oob="true"{% endif %}>
+{% if update_notice %}
+<div class="alert {% if update_notice.critical %}bad{% else %}info{% endif %}" role="status">
+    {% icon "refresh" 18 %}
+    <div class="grow">
+        <b>Excel Finder {{ update_notice.version }} is available</b> <span class="muted">(you have {{ update_notice.current }})</span>
+        {% if update_notice.critical %}<div><b>This update is required: your version is no longer supported.</b></div>{% endif %}
+        {% if update_notice.notes %}<ul>{% for note in update_notice.notes %}<li>{{ note }}</li>{% endfor %}</ul>{% endif %}
+        <div id="ub-progress" class="hint" style="margin-top:6px;font-weight:600" aria-live="polite"></div>
+    </div>
+    <div class="alert-actions">
+        {% if update_notice.one_click %}
+        <button type="button" id="ub-install" class="btn btn-primary btn-sm" data-install="{% url 'update_install' %}" data-status="{% url 'update_status' %}"{% if update_notice.installing %} disabled{% endif %}>Update now</button>
+        {% endif %}
+        <a class="btn btn-sm{% if not update_notice.one_click %} btn-primary{% endif %}" href="{{ update_notice.download_url }}" target="_blank" rel="noopener noreferrer">Download</a>
+        {% if not update_notice.critical %}
+        <button type="button" class="btn btn-ghost btn-sm" hx-post="{% url 'webui:update_dismiss' %}" hx-vals='{"version": "{{ update_notice.version }}"}' hx-swap="none">Not now</button>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+</div>

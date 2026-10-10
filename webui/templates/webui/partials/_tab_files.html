@@ -1,0 +1,11 @@
+{% load webui_tags %}
+<div class="toolbar">
+    <input type="search" name="q" value="{{ q }}" placeholder="Filter by file or folder name…" style="max-width:320px"
+           hx-get="{% url 'webui:search_tab' token 'files' %}" hx-trigger="input changed delay:250ms, search" hx-target="#files-list" hx-include="[name=sort]" aria-label="Filter files">
+    <select name="sort" style="max-width:220px" hx-get="{% url 'webui:search_tab' token 'files' %}" hx-trigger="change" hx-target="#files-list" hx-include="[name=q]" aria-label="Sort files">
+        <option value="numbers"{% if sort == 'numbers' %} selected{% endif %}>Most numbers first</option>
+        <option value="name"{% if sort == 'name' %} selected{% endif %}>File name A–Z</option>
+        <option value="newest"{% if sort == 'newest' %} selected{% endif %}>Newest file first</option>
+    </select>
+</div>
+<div id="files-list">{% include "webui/partials/_files_list.html" %}</div>

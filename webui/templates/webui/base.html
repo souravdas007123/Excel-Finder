@@ -1,0 +1,74 @@
+{% load static webui_tags %}<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Excel Finder{% endblock %}</title>
+<script>(function () { try { document.documentElement.setAttribute("data-theme", localStorage.getItem("ef-theme") === "light" ? "light" : "dark"); } catch (e) {} })();</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b8def'/%3E%3Cpath d='M9 10h14M9 16h14M9 22h8' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="{% static 'webui/app.css' %}?v={{ app_version }}">
+<script src="{% static 'webui/htmx.min.js' %}" defer></script>
+<script src="{% static 'webui/app.js' %}?v={{ app_version }}" defer></script>
+</head>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+{% include "webui/partials/_icons.html" %}
+<div class="loadbar"></div>
+<div class="shell">
+    <aside class="sidebar" id="sidebar">
+        <a class="brand" href="{% url 'webui:dashboard' %}" {% navattrs %}>
+            <span class="brand-mark">{% icon "files" 18 %}</span> Excel Finder
+        </a>
+        <nav class="nav" id="nav" hx-boost="true" hx-target="#page" hx-select="#page" hx-select-oob="#nav" hx-swap="outerHTML" aria-label="Main">
+            <a href="{% url 'webui:dashboard' %}" class="{% if active == 'dashboard' %}active{% endif %}">{% icon "dashboard" %} Dashboard</a>
+            <div class="nav-label">Workflow</div>
+            <a href="{% url 'webui:scan' %}" class="{% if active == 'scan' %}active{% endif %}">{% icon "scan" %} 1. Scan files</a>
+            <a href="{% url 'webui:search' %}" class="{% if active == 'search' %}active{% endif %}">{% icon "search" %} 2. Bulk search</a>
+            <div class="nav-label">Library</div>
+            <a href="{% url 'webui:files' %}" class="{% if active == 'files' %}active{% endif %}">{% icon "files" %} Indexed files</a>
+            <a href="{% url 'webui:history' %}" class="{% if active == 'history' %}active{% endif %}">{% icon "history" %} Scan history</a>
+            <div class="nav-label">Account</div>
+            <a href="{% url 'webui:license' %}" class="{% if active == 'license' %}active{% endif %}">{% icon "shield" %} License</a>
+        </nav>
+        <div class="side-foot">
+            {% if license_chip %}
+            <a class="chip-card {{ license_chip.tone }}" href="{% url 'webui:license' %}" {% navattrs %}>
+                <span class="dot"></span>
+                <span><b>{{ license_chip.text }}</b><span>{{ license_chip.sub }}</span></span>
+            </a>
+            {% endif %}
+            <div class="side-meta">
+                <span>v{{ app_version }}</span>
+                {% if can_use_admin %}<a href="/admin/" hx-boost="false" title="Open the classic admin panel">Admin panel {% icon "external" 13 %}</a>{% endif %}
+            </div>
+            <div class="side-meta">
+                <span>{% icon "user" 14 %} {{ request.user.get_username|truncatechars:22 }}</span>
+                <form method="post" action="{% url 'webui:logout' %}" hx-boost="false">{% csrf_token %}
+                    <button type="submit" class="btn btn-ghost btn-sm" title="Sign out of Excel Finder">{% icon "logout" 15 %} Sign out</button>
+                </form>
+            </div>
+        </div>
+    </aside>
+
+    <main class="main" id="page">
+        <header class="topbar">
+            <button type="button" class="btn btn-ghost menu-btn" data-menu aria-label="Menu">{% icon "menu" 20 %}</button>
+            <div>
+                <h1>{% block heading %}Excel Finder{% endblock %}</h1>
+                {% block subheading %}{% endblock %}
+            </div>
+            <div class="spacer"></div>
+            {% block actions %}{% endblock %}
+            <button type="button" class="btn btn-ghost" data-theme-toggle title="Switch light / dark" aria-label="Switch light or dark theme">
+                <span class="ico-moon">{% icon "moon" 18 %}</span><span class="ico-sun">{% icon "sun" 18 %}</span>
+            </button>
+        </header>
+        <div class="content">
+            {% include "webui/partials/_update_banner.html" %}
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<dialog id="modal" aria-label="Details"><div id="modal-body"></div></dialog>
+</body>
+</html>

@@ -1,0 +1,25 @@
+{% load webui_tags %}
+<div class="modal-head"><h3>Choose a folder</h3><button type="button" class="btn btn-ghost btn-sm" data-close-modal aria-label="Close">{% icon "x" 18 %}</button></div>
+<div class="modal-body">
+{% if error %}<div class="alert bad">{% icon "alert" 18 %}<div class="grow">{{ error }}</div></div>
+{% else %}
+    <div class="row" style="margin-bottom:12px;flex-wrap:nowrap">
+        {% if data.parent is not None %}
+        <button type="button" class="btn btn-sm" hx-get="{% url 'webui:scan_browse' %}?path={{ data.parent|urlencode }}" hx-target="#modal-body">{% icon "up" 14 %} Up</button>
+        {% endif %}
+        <span class="mono muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ data.path|default:"This computer" }}</span>
+    </div>
+    <div class="folder-list">
+        {% for f in data.folders %}
+        <button type="button" hx-get="{% url 'webui:scan_browse' %}?path={{ f.path|urlencode }}" hx-target="#modal-body">{% icon "folder" 16 %} {{ f.name }}</button>
+        {% empty %}
+        <div class="empty" style="padding:24px">No sub-folders here.</div>
+        {% endfor %}
+    </div>
+    <p class="hint" style="margin-top:10px">Click a folder to open it, then press “Use this folder”.</p>
+{% endif %}
+</div>
+<div class="modal-foot">
+    <button type="button" class="btn" data-close-modal>Cancel</button>
+    {% if data and data.path %}<button type="button" class="btn btn-primary" data-use-folder="{{ data.path }}">Use this folder</button>{% endif %}
+</div>

@@ -1,0 +1,30 @@
+{% load webui_tags %}
+<div id="files-table">
+{% if page.object_list %}
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>File</th><th class="num">Size</th><th class="hide-sm">Last scanned</th><th></th></tr></thead>
+            <tbody>
+            {% for f in page.object_list %}
+            <tr>
+                <td><div class="fname">{{ f.file_name }}</div><div class="fpath">{{ f.file_path|folder_of }}</div></td>
+                <td class="num muted">{{ f.file_size|filesize }}</td>
+                <td class="hide-sm muted">{{ f.last_scanned|timeago }}</td>
+                <td class="num"><button type="button" class="btn btn-sm btn-ghost" data-copy="{{ f.file_path }}" title="Copy full path">{% icon "copy" 14 %} Copy path</button></td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="pager">
+        <span>{{ page.start_index }}–{{ page.end_index }} of {{ page.paginator.count|comma }}{% if q %} matching “{{ q }}”{% endif %}</span>
+        <span class="row">
+            {% if page.has_previous %}<button type="button" class="btn btn-sm" hx-get="{% url 'webui:files' %}?q={{ q|urlencode }}&page={{ page.previous_page_number }}" hx-target="#files-table" hx-swap="outerHTML" hx-push-url="true">{% icon "arrow" 14 %} Previous</button>{% endif %}
+            {% if page.has_next %}<button type="button" class="btn btn-sm" hx-get="{% url 'webui:files' %}?q={{ q|urlencode }}&page={{ page.next_page_number }}" hx-target="#files-table" hx-swap="outerHTML" hx-push-url="true">Next {% icon "arrow" 14 %}</button>{% endif %}
+        </span>
+    </div>
+{% else %}
+    <div class="card empty">{% icon "files" 30 %}<b>{% if q %}No files match “{{ q }}”{% else %}No files indexed yet{% endif %}</b>{% if q %}Try a different name or number.{% else %}Run a scan to add your Excel files.{% endif %}
+        {% if not q %}<div style="margin-top:14px"><a class="btn btn-primary" href="{% url 'webui:scan' %}" {% navattrs %}>Go to Scan</a></div>{% endif %}</div>
+{% endif %}
+</div>

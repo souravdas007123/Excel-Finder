@@ -1,0 +1,11 @@
+{% load webui_tags %}
+<div class="toolbar">
+    <input type="search" name="q" value="{{ q }}" placeholder="Filter by number…" style="max-width:260px"
+           hx-get="{% url 'webui:search_tab' token 'numbers' %}" hx-trigger="input changed delay:250ms, search" hx-target="#numbers-list" hx-include="[name=filter]" aria-label="Filter numbers">
+    <input type="hidden" name="filter" value="{{ filter }}">
+    <div class="seg" role="group" aria-label="Show">
+        {% for key, label in filters %}<button type="button" class="{% if filter == key %}active{% endif %}"
+            hx-get="{% url 'webui:search_tab' token 'numbers' %}?filter={{ key }}" hx-target="#results-pane" hx-swap="innerHTML" hx-include="[name=q]">{{ label }}</button>{% endfor %}
+    </div>
+</div>
+<div id="numbers-list">{% include "webui/partials/_numbers_list.html" %}</div>

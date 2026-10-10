@@ -1,0 +1,52 @@
+{% extends "webui/base.html" %}
+{% load webui_tags %}
+{% block title %}Bulk search | Excel Finder{% endblock %}
+{% block heading %}Bulk search{% endblock %}
+{% block subheading %}<div class="sub">Step 2 · Find which files contain your numbers</div>{% endblock %}
+{% block content %}
+<div class="stack">
+    {% if not has_index %}
+    <div class="alert warn">{% icon "alert" 18 %}
+        <div class="grow"><b>Nothing to search yet.</b> Scan a drive or folder first, then come back.</div>
+        <a class="btn btn-primary btn-sm" href="{% url 'webui:scan' %}" {% navattrs %}>Go to Scan</a>
+    </div>
+    {% elif stale %}
+    <div class="alert warn">{% icon "alert" 18 %}
+        <div class="grow">Your index is {{ last_scan|timeago }}. New or changed files may be missing: <a href="{% url 'webui:scan' %}" {% navattrs %}>scan again</a> for fresh results.</div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <form id="search-form" method="post" action="/admin/export-excel-api/" enctype="multipart/form-data" hx-boost="false" autocomplete="off">
+            {% csrf_token %}
+            <div class="card-head">
+                <h2>{% icon "hash" 18 %} Phone numbers</h2>
+                <span class="hint">{{ index_files|comma }} file{{ index_files|pluralize }} in the index</span>
+            </div>
+            {% include "webui/partials/_numbers_box.html" with numbers="" %}
+            <div class="row" style="margin-top:12px">
+                <input id="file-input" type="file" name="file" accept=".xlsx,.xlsm,.xls,.xlsb,.csv,.txt" hidden
+                       hx-post="{% url 'webui:search_extract' %}" hx-trigger="change" hx-encoding="multipart/form-data"
+                       hx-include="#first-col, #last10" hx-target="#numbers-box" hx-swap="outerHTML">
+                <button type="button" class="btn" data-pick-file="#file-input">{% icon "upload" 16 %} Upload Excel / CSV</button>
+                <label class="check"><input type="checkbox" id="first-col" name="first_col" value="1"> Read first column only</label>
+                <label class="check"><input type="checkbox" id="last10" name="last10" value="1" checked> Ignore country code (match last 10 digits)</label>
+            </div>
+            <div class="row" style="margin-top:16px">
+                <button id="search-btn" type="button" class="btn btn-primary btn-lg"
+                        hx-post="{% url 'webui:search_run' %}" hx-include="#numbers, #last10" hx-params="numbers,last10" hx-target="#results" hx-swap="innerHTML" hx-indicator="this"
+                        {% if not has_index %}disabled{% endif %}>
+                    {% icon "search" 17 %} <span class="spin"></span> Search database
+                </button>
+                <button type="button" class="btn" onclick="var t=document.getElementById('numbers');t.value='';t.dispatchEvent(new Event('input'));document.getElementById('results').replaceChildren();t.focus()">Clear</button>
+                <div class="history-wrap">
+                    <button id="history-btn" type="button" class="btn" aria-haspopup="true"><span class="lbl">Recent</span> {% icon "history" 15 %}</button>
+                    <div id="history-menu" hidden></div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <div id="results"></div>
+</div>
+{% endblock %}

@@ -1,0 +1,7 @@
+{% load webui_tags %}
+{% if items %}
+<div class="nums">{% include "webui/partials/_numbers_rows.html" %}</div>
+<div class="hint" style="padding-top:10px">{{ total|comma }} number{{ total|pluralize }}.</div>
+{% else %}
+<div class="empty">{% icon "search" 28 %}<b>Nothing to show</b>Try a different filter.</div>
+{% endif %}

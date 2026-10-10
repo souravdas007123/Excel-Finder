@@ -1,0 +1,19 @@
+{% load webui_tags %}
+<div class="modal-head"><div><h3>Scan #{{ task.id }}</h3><div class="hint">{{ task.created_at|date:"d M Y, H:i" }}</div></div>
+    <button type="button" class="btn btn-ghost btn-sm" data-close-modal aria-label="Close">{% icon "x" 18 %}</button></div>
+<div class="modal-body">
+    <div class="chips" style="margin-bottom:14px">
+        {% include "webui/partials/_status_pill.html" with status=task.status %}
+        <span class="pill ok">{{ task.files_indexed|comma }} indexed</span><span class="pill">{{ task.files_skipped|comma }} unchanged</span>
+        <span class="pill {% if task.files_failed %}bad{% endif %}">{{ task.files_failed|comma }} failed</span>
+    </div>
+    {% if task.status == "Error" and task.message %}<div class="alert bad" style="margin-bottom:14px">{% icon "alert" 18 %}<div class="grow">{{ task.message }}</div></div>{% endif %}
+    {% if failures %}
+    <div class="table-wrap"><table><thead><tr><th>File</th><th>Why it could not be read</th></tr></thead><tbody>
+        {% for f in failures %}<tr><td class="fpath" style="color:var(--text)">{{ f.file_path }}</td><td>{{ f.reason }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% if more %}<p class="hint" style="margin-top:10px">Showing the first {{ failures|length }} of {{ task.files_failed|comma }} files.</p>{% endif %}
+    {% elif task.files_failed %}<p class="hint">{{ task.files_failed|comma }} files could not be read.</p>
+    {% else %}<p class="hint">Every file was read successfully.</p>{% endif %}
+</div>
+<div class="modal-foot"><button type="button" class="btn btn-primary" data-close-modal>Close</button></div>
