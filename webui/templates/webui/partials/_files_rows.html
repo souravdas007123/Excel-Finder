@@ -1,12 +1,12 @@
 {% load webui_tags %}{% for f in items %}
 <tr>
     <td>
-        <div class="fname">{{ f.file }}</div>
+        <div class="fname hit">{{ f.file }}</div>
         <div class="fpath">{{ f.folder }}</div>
         <div class="chips" style="margin-top:8px">{% for n in f.preview %}<span class="num-chip">{{ n }}</span>{% endfor %}{% if f.more_numbers %}<span class="hint">+{{ f.more_numbers|comma }} more</span>{% endif %}</div>
         <div id="fd-{{ f.file_id }}" hidden class="detail-box" style="margin-top:10px;border-radius:8px"><span class="hint">Loading…</span></div>
     </td>
-    <td class="num"><span class="pill accent">{{ f.numbers_count|comma }}</span></td>
+    <td class="num"><span class="pill ok">{{ f.numbers_count|comma }}</span></td>
     <td class="num">{{ f.matches|comma }}</td>
     <td class="hide-sm muted">{{ f.modified }}</td>
     <td class="num" style="white-space:nowrap">

@@ -274,3 +274,4 @@ details summary { list-style: none; } details summary::-webkit-details-marker { 
 details:not(.num) > summary::before { content: "\25B8  "; color: var(--muted); }
 details[open]:not(.num) > summary::before { content: "\25BE  "; }
 form.auth-card { display: flex; flex-direction: column; gap: 14px; }
+.fname.hit { color: var(--ok); }
