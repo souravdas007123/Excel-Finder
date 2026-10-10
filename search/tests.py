@@ -54,7 +54,7 @@ class AccountSetupTests(TestCase):
 
     def test_signup_creates_the_server_account_and_the_local_login(self):
         r = self.client.post("/setup/", self.DATA)
-        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+        self.assertRedirects(r, "/app/", fetch_redirect_response=False)
         self.register_mock.assert_called_once_with("Ravi", "ravi@example.com", "Str0ng-Pass-77")
         user = get_user_model().objects.get()
         self.assertEqual((user.username, user.email, user.is_superuser), ("ravi@example.com", "ravi@example.com", True))
@@ -87,7 +87,7 @@ class AccountSetupTests(TestCase):
         self.assertContains(page, "Sign in to Excel Finder")
         self.assertNotContains(page, 'name="confirm"')
         r = self.client.post("/setup/", {"mode": "signin", "email": "ravi@example.com", "password": "Str0ng-Pass-77"})
-        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+        self.assertRedirects(r, "/app/", fetch_redirect_response=False)
         self.login_mock.assert_called_once_with("ravi@example.com", "Str0ng-Pass-77")
         self.register_mock.assert_not_called()
         self.assertTrue(get_user_model().objects.filter(username="ravi@example.com").exists())
@@ -101,7 +101,7 @@ class AccountSetupTests(TestCase):
     def test_setup_is_closed_once_an_account_exists(self):
         get_user_model().objects.create_superuser("owner", "o@example.com", "Str0ng-Pass-77")
         r = self.client.post("/setup/", self.DATA)
-        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+        self.assertRedirects(r, "/app/", fetch_redirect_response=False)
         self.register_mock.assert_not_called()
 
 
@@ -123,11 +123,11 @@ class FirstRunSetupTests(TestCase):
 
     def test_creating_the_account_signs_in_and_opens_the_app(self):
         r = self.client.post("/setup/", {"username": "owner", "password": "Str0ng-Pass-77", "confirm": "Str0ng-Pass-77"})
-        self.assertRedirects(r, "/admin/", fetch_redirect_response=False)
+        self.assertRedirects(r, "/app/", fetch_redirect_response=False)
         user = get_user_model().objects.get(username="owner")
         self.assertTrue(user.is_superuser and user.is_staff)
         self.assertTrue(user.check_password("Str0ng-Pass-77"))
-        self.assertEqual(self.client.get("/admin/").status_code, 200)         # sign-in ho chuka
+        self.assertEqual(self.client.get("/app/").status_code, 200)         # sign-in ho chuka
 
     def test_bad_input_is_rejected_with_a_reason(self):
         cases = [
@@ -145,14 +145,14 @@ class FirstRunSetupTests(TestCase):
 
     def test_setup_is_closed_once_an_account_exists(self):
         get_user_model().objects.create_superuser("owner", "", "Str0ng-Pass-77")
-        self.assertRedirects(self.client.get("/setup/"), "/admin/", fetch_redirect_response=False)
+        self.assertRedirects(self.client.get("/setup/"), "/app/", fetch_redirect_response=False)
         r = self.client.post("/setup/", {"username": "intruder", "password": "Str0ng-Pass-88", "confirm": "Str0ng-Pass-88"})
         self.assertEqual(r.status_code, 302)
         self.assertEqual(get_user_model().objects.count(), 1)                    # koi dusra admin nahi ban sakta
 
-    def test_root_redirects_to_admin_after_setup(self):
+    def test_root_redirects_to_the_app_after_setup(self):
         get_user_model().objects.create_superuser("owner", "", "Str0ng-Pass-77")
-        self.assertRedirects(self.client.get("/"), "/admin/", fetch_redirect_response=False)
+        self.assertRedirects(self.client.get("/"), "/app/", fetch_redirect_response=False)
 
 
 class BuildConfigTests(SimpleTestCase):
