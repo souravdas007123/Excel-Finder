@@ -411,6 +411,18 @@ def file_report(upload, first_col=False, last10=True):
     return data, None, None
 
 
+def _shrink_database():
+    """Index saaf hone ke baad database file ka size chhota karo (background me). Koi dusra kaam chal raha ho toh chhod do."""
+    try:
+        with connection.cursor() as cur:
+            cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            cur.execute("VACUUM")
+    except Exception:
+        pass
+    finally:
+        connection.close()
+
+
 def clear_index(user):
     """Poora index hatao. (files_removed, None, None) ya (None, error, http status)."""
     if not user.has_perm("fileindex.delete_fileindex"):
@@ -425,10 +437,7 @@ def clear_index(user):
             cur.execute(f"DELETE FROM {qn(NumberIndex._meta.db_table)}")
             cur.execute(f"DELETE FROM {qn(FileIndex._meta.db_table)}")
         if connection.vendor == "sqlite":
-            try:
-                connection.cursor().execute("VACUUM")   # database file ka size bhi chhota ho jata hai
-            except Exception:
-                pass
+            threading.Thread(target=_shrink_database, daemon=True).start()   # file chhoti karna peeche chalta hai: screen na ruke
     finally:
         scan_lock.release()
     return files_removed, None, None
