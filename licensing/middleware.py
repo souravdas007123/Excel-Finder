@@ -8,7 +8,7 @@ from . import service
 ALLOWED_PREFIXES = (
     "/admin/login/", "/admin/logout/", "/admin/licensing/", "/admin/jsi18n/", "/admin/password_change/", "/admin/update/",
     "/static/", "/setup/",
-    "/app/license/", "/app/login/", "/app/logout/", "/app/updates/",
+    "/app/license/", "/app/login/", "/app/logout/", "/app/forgot/", "/app/updates/",
 )
 GUARDED_PREFIXES = ("/admin/", "/app/")
 

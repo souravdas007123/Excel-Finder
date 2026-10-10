@@ -2,7 +2,7 @@
 import secrets
 
 from django.core.cache import cache
-from django.http import Http404, HttpResponse
+from django.http import Http404
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
 

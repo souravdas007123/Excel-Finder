@@ -63,6 +63,10 @@
             </button>
         </header>
         <div class="content">
+            {% if license_warn and active != 'license' %}
+            <div class="banner"><div class="alert warn" role="status">{% icon "alert" 18 %}<div class="grow">{{ license_warn }}</div>
+                <a class="btn btn-sm" href="{% url 'webui:license' %}" {% navattrs %}>License</a></div></div>
+            {% endif %}
             {% include "webui/partials/_update_banner.html" %}
             {% block content %}{% endblock %}
         </div>

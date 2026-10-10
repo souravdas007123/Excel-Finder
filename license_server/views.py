@@ -59,16 +59,10 @@ def api(request, action):
             result = core.check(data.get("key"), usage=data.get("usage"), **common, **meta)
         elif action == "deactivate":
             result = core.deactivate(data.get("key"), data.get("machine_id"))
-        elif action == "trial":
-            result = core.start_trial(**common, **meta)
         elif action == "register":
-            result = core.register(data.get("name"), data.get("email"), data.get("password"), usage=data.get("usage"), **common, **meta)
-        elif action == "login":
-            result = core.login(data.get("email"), data.get("password"), usage=data.get("usage"), **common, **meta)
-        elif action == "account_check":
-            result = core.account_check(data.get("email"), data.get("device_token"), usage=data.get("usage"), **common, **meta)
-        elif action == "logout":
-            result = core.account_logout(data.get("email"), data.get("device_token"), data.get("machine_id"))
+            result = core.request_license(data.get("name"), data.get("email"))
+        elif action == "reset":
+            result = core.verify_reset(data.get("email"), data.get("code"))
         else:
             return _fail("not_found", "Unknown action.", 404)
     except core.LicenseError as exc:

@@ -26,7 +26,7 @@ GOOD_KEY = "EXFN-ABCDE-FGHJK-LMNPQ-RSTUV"
 
 
 class FakeServer:
-    """License server ki nakal: activate / check / deactivate / trial ka jawab, aur kya-kya bheja gaya uska record."""
+    """License server ki nakal: register / activate / check / deactivate / reset ka jawab, aur kya-kya bheja gaya uska record."""
 
     def __init__(self):
         self.calls = []
@@ -37,7 +37,6 @@ class FakeServer:
         self.error = None            # (http, code, message) ya None
         self.private = PRIVATE
         self.clock = protocol.utcnow            # test me badal sakte hain (time travel)
-        self.pending = False                    # account hai par seller ne plan nahi diya
 
     def token(self, machine, now=None):
         now = now or self.clock()
@@ -56,19 +55,13 @@ class FakeServer:
             return http, {"ok": False, "error": code, "message": message}
         if action == "activate" and protocol.normalize_key(payload.get("key")) != GOOD_KEY:
             return 404, {"ok": False, "error": "invalid_key", "message": "This license key is not valid."}
-        if action in ("deactivate", "logout"):
+        if action == "deactivate":
             return 200, {"ok": True, "deactivated": True}
+        if action == "register":
+            return 200, {"ok": True, "message": "Request received. The seller will email you a license key."}
+        if action == "reset":
+            return 200, {"ok": True, "message": "Reset code accepted."}
         now = self.clock()
-        if action in ("register", "login", "account_check"):
-            account = {"email": payload["email"].lower(), "name": payload.get("name", "Ravi")}
-            if self.pending:
-                return 200, {"ok": True, "pending": True, "message": "Your account is created and waiting for approval.",
-                             "device_token": "device-secret-1", "account": account}
-            reply = {"ok": True, "token": self.token(payload["machine_id"], now), "server_time": protocol.iso(now),
-                     "license": {"type": self.license_type, "customer": "Ravi Traders",
-                                 "expires": protocol.iso(None if self.license_type == "lifetime" else self.expires(now))},
-                     "device_token": "device-secret-1", "account": account}
-            return 200, reply
         expires = None if self.license_type == "lifetime" else self.expires(now)
         return 200, {"ok": True, "token": self.token(payload["machine_id"], now), "server_time": protocol.iso(now),
                      "license": {"type": self.license_type, "customer": "Ravi Traders", "expires": protocol.iso(expires)}}
@@ -129,9 +122,9 @@ class BlockingTests(LicenseTestCase):
             self.assertRedirects(r, license_page, fetch_redirect_response=False, msg_prefix=name)
         r = self.client.get(license_page)
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "NOT SIGNED IN")
-        self.assertContains(r, "Sign in to your account")
-        self.assertContains(r, "Create an account")
+        self.assertContains(r, "NOT ACTIVATED")
+        self.assertContains(r, "Activate your license")
+        self.assertNotContains(r, "Create an account")
 
     def test_apis_answer_402_with_the_reason(self):
         for name in ("bulk_search", "start_scan", "export_excel", "clear_index"):
@@ -253,7 +246,7 @@ class ActivationFlowTests(LicenseTestCase):
         action, payload = self.server.calls[0]
         self.assertEqual(action, "activate")
         self.assertEqual(set(payload), {"key", "machine_id", "machine_name", "usage"})
-        self.assertEqual(set(payload["usage"]), {"searches_total", "scans_total"})
+        self.assertEqual(set(payload["usage"]), {"searches_total", "scans_total", "files_indexed"})
 
     def test_wrong_key_shows_the_server_message_and_stays_blocked(self):
         r = self.post("admin:licensing_activate", {"key": "EXFN-AAAAA-AAAAA-AAAAA-AAAAA"})
@@ -313,7 +306,7 @@ class CheckTests(LicenseTestCase):
         self.server.clock = lambda: protocol.utcnow() + timedelta(minutes=5)     # server ka naya token naye time ka hoga
         self.assertTrue(service.check_now().ok)
         action, payload = self.server.calls[0]
-        self.assertEqual((action, payload["usage"]), ("check", {"searches_total": 7, "scans_total": 2}))
+        self.assertEqual((action, payload["usage"]), ("check", {"searches_total": 7, "scans_total": 2, "files_indexed": 0}))
         self.assertNotEqual(LicenseState.get().token, old)
         self.assertIsNotNone(LicenseState.get().last_check_at)
 
@@ -368,46 +361,6 @@ class CheckTests(LicenseTestCase):
         self.assertEqual(self.server.calls, [])
 
 
-class TrialTests(LicenseTestCase):
-    def setUp(self):
-        super().setUp()
-        self.server.license_type = "trial"
-        self.server.expires = lambda now: now + timedelta(days=14)
-
-    def test_trial_unlocks_the_app_without_a_key(self):
-        result = service.start_trial()
-        self.assertTrue(result.ok, result.message)
-        status = service.current_status(force=True)
-        self.assertEqual((status.ok, status.license_type), (True, "trial"))
-        self.assertTrue(LicenseState.get().trial_started)
-        self.assertEqual(LicenseState.get().license_key, "")
-
-    def test_trial_check_uses_the_trial_endpoint_and_expiry_blocks(self):
-        service.start_trial()
-        self.server.calls.clear()
-        service.check_now()
-        self.assertEqual(self.server.calls[0][0], "trial")
-        self.server.error = (403, "expired", "Your free trial has ended.")
-        service.check_now()
-        self.assertEqual(service.current_status(force=True).code, "expired")
-
-    def test_trial_is_not_offered_on_the_page_but_the_ended_trial_message_works(self):
-        page = self.client.get(reverse("admin:licensing_licensestate_changelist"))
-        self.assertNotContains(page, "Start free trial")       # ab plan seller deta hai (account ke baad)
-        service.start_trial()
-        LicenseState.objects.update(token="", license_key="")        # token gaya, par trial ho chuka hai
-        service.invalidate()
-        self.server.error = (403, "expired", "Your free trial has ended.")
-        self.assertIn("trial has ended", service.start_trial().message)
-
-    def test_trial_then_buying_a_key(self):
-        service.start_trial()
-        self.server.license_type = "yearly"
-        self.server.expires = lambda now: now + timedelta(days=365)
-        self.assertTrue(service.activate(GOOD_KEY).ok)
-        self.assertEqual(service.current_status(force=True).license_type, "yearly")
-
-
 class DeactivateTests(LicenseTestCase):
     def test_deactivate_releases_the_seat_and_clears_the_pc(self):
         self.activate_ok()
@@ -441,6 +394,16 @@ class UsageTests(LicenseTestCase):
         self.assertEqual(state.searches_total, 3)
         self.assertEqual(state.scans_total, 1)
 
+    def test_files_indexed_is_sent_as_a_plain_count(self):
+        from fileindex.models import FileIndex
+        for i in range(3):
+            FileIndex.objects.create(file_name=f"f{i}.xlsx", file_path=f"/data/f{i}.xlsx")
+        self.activate_ok()
+        self.server.calls.clear()
+        service.check_now()
+        self.assertEqual(self.server.calls[0][1]["usage"]["files_indexed"], 3)
+        self.assertNotIn("f0.xlsx", str(self.server.calls))               # file ka naam / path kabhi nahi jata
+
     def test_counting_never_breaks_a_search(self):
         self.activate_ok()
         with mock.patch.object(LicenseState.objects, "filter", side_effect=RuntimeError("db down")), \
@@ -448,142 +411,65 @@ class UsageTests(LicenseTestCase):
             service.record_usage("search")           # exception bahar nahi aani chahiye
 
 
-class AccountFlowTests(LicenseTestCase):
-    """Email + password account: seller plan deta hai. Password app me kabhi save nahi hota."""
+class RequestTests(LicenseTestCase):
+    """Customer naam + email deta hai, seller key email karta hai. App password server ko nahi bhejta."""
 
-    def post(self, name, data=None):
-        return self.client.post(reverse(name), data or {})
-
-    def register(self, **kw):
-        data = dict(name="Ravi", email="Ravi@Example.com", password="Str0ng-Pass-77", confirm="Str0ng-Pass-77")
-        data.update(kw)
-        return self.post("admin:licensing_register", data)
-
-    def test_new_account_waits_for_approval_and_the_app_stays_closed(self):
-        self.server.pending = True
-        r = self.register()
-        self.assertTrue(any("waiting for approval" in m for m in self.messages(r)))
-        status = service.current_status(force=True)
-        self.assertEqual((status.code, status.ok), ("pending", False))
-        state = LicenseState.get()
-        self.assertEqual((state.account_email, state.device_token), ("ravi@example.com", "device-secret-1"))
-        self.assertEqual(state.token, "")
-        page = self.client.get(reverse("admin:licensing_licensestate_changelist"))
-        self.assertContains(page, "WAITING FOR APPROVAL")
-        self.assertContains(page, "location.reload")                 # page khud refresh hota hai
-        self.assertRedirects(self.client.get(reverse("admin:index")), reverse("admin:licensing_licensestate_changelist"),
-                             fetch_redirect_response=False)
-
-    def test_password_is_sent_to_the_server_but_never_saved_here(self):
-        self.server.pending = True
-        self.register()
-        self.assertEqual(self.server.calls[0][1]["password"], "Str0ng-Pass-77")
-        saved = " ".join(str(v) for v in LicenseState.get().__dict__.values())
-        self.assertNotIn("Str0ng-Pass-77", saved)
-        service.check_now()
-        self.assertNotIn("password", self.server.calls[-1][1])
-        self.assertEqual(self.server.calls[-1][0], "account_check")
-        self.assertEqual(self.server.calls[-1][1]["device_token"], "device-secret-1")
-
-    def test_seller_gives_a_plan_and_the_next_check_opens_the_app(self):
-        self.server.pending = True
-        self.register()
-        self.server.pending = False
-        self.server.license_type = "monthly"
-        result = service.check_now()
+    def test_register_sends_only_name_email_and_the_pc(self):
+        result = service.register(" Ravi Kumar ", "Ravi@Example.com ")
         self.assertTrue(result.ok, result.message)
+        action, payload = self.server.calls[-1]
+        self.assertEqual(action, "register")
+        self.assertEqual(payload, {"name": "Ravi Kumar", "email": "ravi@example.com", "machine_id": PC, "machine_name": "OFFICE-PC"})
+
+    def test_register_remembers_who_you_are_and_the_app_stays_closed_until_a_key(self):
+        service.register("Ravi Kumar", "ravi@example.com")
+        state = LicenseState.get()
+        self.assertEqual((state.account_name, state.account_email), ("Ravi Kumar", "ravi@example.com"))
         status = service.current_status(force=True)
-        self.assertEqual((status.code, status.ok, status.license_type), ("active", True, "monthly"))
-        self.assertEqual(self.client.get(reverse("admin:index")).status_code, 200)
-        self.assertContains(self.client.get(reverse("admin:licensing_licensestate_changelist")), "ravi@example.com")
+        self.assertEqual((status.code, status.ok), ("unlicensed", False))
 
-    def test_sign_in_with_an_approved_account_activates_at_once(self):
-        r = self.post("admin:licensing_login", {"email": "ravi@example.com", "password": "Str0ng-Pass-77"})
-        self.assertTrue(any("Signed in" in m for m in self.messages(r)))
-        self.assertTrue(service.current_status(force=True).ok)
-
-    def test_wrong_password_saves_nothing(self):
-        self.server.error = (401, "bad_login", "Wrong email or password.")
-        r = self.post("admin:licensing_login", {"email": "ravi@example.com", "password": "nope"})
-        self.assertTrue(any("Wrong email or password" in m for m in self.messages(r)))
-        state = LicenseState.get()
-        self.assertEqual((state.device_token, state.token, state.account_email), ("", "", ""))
-
-    def test_mismatched_confirm_never_reaches_the_server(self):
-        r = self.register(confirm="Different-Pass-1")
-        self.assertTrue(any("do not match" in m for m in self.messages(r)))
-        self.assertEqual(self.server.calls, [])
-
-    def test_blocked_by_seller_shows_on_the_next_check(self):
-        self.register()
-        service.invalidate()
-        self.assertTrue(service.current_status(force=True).ok)
-        self.server.error = (403, "revoked", "This account has been disabled. Please contact support.")
-        self.assertFalse(service.check_now().ok)
-        self.assertEqual(service.current_status(force=True).code, "revoked")
-
-    def test_sign_out_releases_the_pc_and_asks_to_sign_in_again(self):
-        self.register()
-        r = self.post("admin:licensing_deactivate")
-        self.assertEqual(self.server.calls[-1][0], "logout")
-        self.assertTrue(any("signed out" in m for m in self.messages(r)))
-        state = LicenseState.get()
-        self.assertEqual((state.device_token, state.account_email, state.token), ("", "", ""))
-        self.assertEqual(service.current_status(force=True).code, "unlicensed")
-
-    def test_sign_out_needs_internet_so_the_seat_is_really_freed(self):
-        self.register()
+    def test_register_needs_the_internet_and_remembers_nothing_on_failure(self):
         self.server.unreachable = True
-        self.assertFalse(service.deactivate().ok)
-        self.assertEqual(LicenseState.get().device_token, "device-secret-1")
+        result = service.register("Ravi", "ravi@example.com")
+        self.assertEqual((result.ok, "internet" in result.message), (False, True))
+        self.assertEqual(LicenseState.get().account_email, "")
 
-    def test_revoked_device_must_sign_in_again(self):
-        self.register()
-        self.server.error = (409, "not_activated", "This PC is not signed in. Please sign in again.")
-        service.check_now()
-        self.assertEqual(service.current_status(force=True).code, "not_activated")
+    def test_server_refusal_is_shown(self):
+        self.server.error = (400, "bad_email", "Please enter a valid email address.")
+        result = service.register("Ravi", "nope")
+        self.assertEqual((result.ok, result.message), (False, "Please enter a valid email address."))
+        self.assertEqual(LicenseState.get().account_email, "")
 
-    def test_only_a_superuser_can_register_or_sign_in(self):
-        self.client.force_login(self.staff)
-        self.register()
-        self.post("admin:licensing_login", {"email": "a@b.co", "password": "x"})
-        self.assertEqual(self.server.calls, [])
-
-
-class PendingBackgroundTests(LicenseTestCase):
-    def setUp(self):
-        super().setUp()
-        service._state["next_bg_check"] = 0.0
-        self.server.pending = True
-        service.register("Ravi", "ravi@example.com", "Str0ng-Pass-77")
+    def test_key_from_the_seller_then_unlocks_the_app(self):
+        service.register("Ravi Kumar", "ravi@example.com")
+        self.assertTrue(service.activate(GOOD_KEY).ok)
         service.invalidate()
+        self.assertTrue(service.current_status().ok)
+        self.assertEqual(self.client.get(reverse("webui:dashboard")).status_code, 200)
 
-    def run_maybe(self):
-        started = []
-
-        class FakeThread:
-            def __init__(self, target, daemon):
-                self.target = target
-
-            def start(self):
-                started.append(self.target)
-
-        with mock.patch.object(service.threading, "Thread", FakeThread):
+    def test_background_checks_need_a_key(self):
+        service._state["next_bg_check"] = 0.0
+        service.register("Ravi", "ravi@example.com")
+        with mock.patch.object(service.threading, "Thread") as thread:
             service.maybe_background_check()
-        return started
+        thread.assert_not_called()
 
-    def test_pending_account_is_rechecked_within_minutes_not_a_day(self):
-        LicenseState.objects.update(last_check_at=timezone.now() - timedelta(minutes=6))
-        self.assertEqual(len(self.run_maybe()), 1)
 
-    def test_pending_account_is_not_hammered(self):
-        LicenseState.objects.update(last_check_at=timezone.now() - timedelta(minutes=1))
-        self.assertEqual(self.run_maybe(), [])
+class ResetCodeTests(LicenseTestCase):
+    def test_code_is_checked_on_the_server_and_the_reply_is_passed_on(self):
+        result = service.reset_password_code_ok(" Ravi@Example.com", "ABCD-EFGH")
+        self.assertTrue(result.ok)
+        self.assertEqual(self.server.calls[-1], ("reset", {"email": "ravi@example.com", "code": "ABCD-EFGH"}))
 
-    def test_blocked_pages_trigger_the_pending_check(self):
-        with mock.patch.object(service, "maybe_background_check") as spy:
-            self.client.get(reverse("admin:index"))
-        spy.assert_called_once()
+    def test_wrong_code(self):
+        self.server.error = (403, "bad_code", "That reset code is not valid or has expired.")
+        result = service.reset_password_code_ok("ravi@example.com", "AAAA-AAAA")
+        self.assertEqual((result.ok, result.message), (False, "That reset code is not valid or has expired."))
+
+    def test_needs_the_internet(self):
+        self.server.unreachable = True
+        result = service.reset_password_code_ok("ravi@example.com", "ABCD-EFGH")
+        self.assertEqual((result.ok, "internet" in result.message), (False, True))
 
 
 class BackgroundCheckTests(LicenseTestCase):

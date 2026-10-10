@@ -46,15 +46,14 @@
     <div class="lic-status">
         {% if not enforced %}<span class="lic-pill off">NOT ENFORCED</span>
         {% elif status.ok %}<span class="lic-pill ok">ACTIVE</span>
-        {% elif status.code == 'pending' %}<span class="lic-pill wait">WAITING FOR APPROVAL</span>
-        {% else %}<span class="lic-pill bad">{% if status.code == 'expired' %}EXPIRED{% elif status.code == 'revoked' %}DISABLED{% elif status.code == 'unlicensed' %}NOT SIGNED IN{% else %}BLOCKED{% endif %}</span>{% endif %}
+        {% else %}<span class="lic-pill bad">{% if status.code == 'expired' %}EXPIRED{% elif status.code == 'revoked' %}DISABLED{% elif status.code == 'unlicensed' %}NOT ACTIVATED{% else %}BLOCKED{% endif %}</span>{% endif %}
         {% if status.type_label %}<span class="lic-plan">{{ status.type_label }}</span>{% endif %}
     </div>
-    <div class="lic-msg {% if status.code == 'pending' %}warn{% elif not status.ok %}bad{% elif status.warn %}warn{% endif %}">{% if status.warn %}{{ status.warn }}{% else %}{{ status.message }}{% endif %}</div>
+    <div class="lic-msg {% if not status.ok %}bad{% elif status.warn %}warn{% endif %}">{% if status.warn %}{{ status.warn }}{% else %}{{ status.message }}{% endif %}</div>
 
-    {% if has_license or signed_in %}
+    {% if has_license %}
     <dl class="lic-grid">
-        {% if account_email %}<dt>Account</dt><dd>{{ account_email }}</dd>{% endif %}
+        {% if account_email %}<dt>Registered as</dt><dd>{{ account_name }} &lt;{{ account_email }}&gt;</dd>{% endif %}
         {% if status.customer %}<dt>Licensed to</dt><dd>{{ status.customer }}</dd>{% endif %}
         {% if status.license_type %}
             <dt>Valid until</dt>
@@ -69,81 +68,33 @@
     </dl>
     {% endif %}
 
-    {% if status.code == 'pending' %}
-    <p class="lic-small" style="margin:14px 0 0"><b>Nothing more to do here.</b> This page refreshes by itself and the app opens as soon as the seller gives you access.
-        {% if support %}Questions? <b>{{ support }}</b>.{% endif %}</p>
-    <script>setTimeout(function () { location.reload(); }, 30000);</script>
-    {% endif %}
-
-    {% if can_manage and has_license or can_manage and signed_in %}
+    {% if can_manage and has_license %}
     <div class="lic-row" style="margin-top:16px">
         <form method="post" action="{% url 'admin:licensing_check' %}">{% csrf_token %}<button class="btn-secondary" type="submit" style="height:44px;padding:0 22px">Check now</button></form>
     </div>
     {% endif %}
 </div>
 
-{% if can_manage and not signed_in %}
+{% if can_manage and not status.ok or can_manage and not has_license %}
 <div class="premium-card lic-card">
-    <h3>Sign in to your account</h3>
-    <form method="post" action="{% url 'admin:licensing_login' %}">
+    <h3>Activate your license</h3>
+    <form method="post" action="{% url 'admin:licensing_activate' %}" class="lic-row">
         {% csrf_token %}
-        <div class="lic-row">
-            <input class="input-field lic-plain" type="email" name="email" placeholder="Email" autocomplete="username" required aria-label="Email">
-            <input class="input-field lic-plain" type="password" name="password" placeholder="Password" autocomplete="current-password" required aria-label="Password">
-            <button class="btn-primary" type="submit">Sign in</button>
-        </div>
+        <input class="input-field" type="text" name="key" placeholder="EXFN-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" spellcheck="false" required aria-label="License key">
+        <button class="btn-primary" type="submit">Activate</button>
     </form>
-</div>
-
-<div class="premium-card lic-card">
-    <h3>New here? Create an account</h3>
-    <form method="post" action="{% url 'admin:licensing_register' %}">
-        {% csrf_token %}
-        <div class="lic-row" style="margin-bottom:10px">
-            <input class="input-field lic-plain" type="text" name="name" placeholder="Your name" autocomplete="name" required aria-label="Name">
-            <input class="input-field lic-plain" type="email" name="email" placeholder="Email" autocomplete="email" required aria-label="Email">
-        </div>
-        <div class="lic-row">
-            <input class="input-field lic-plain" type="password" name="password" placeholder="Password (8+ characters)" minlength="8" autocomplete="new-password" required aria-label="Password">
-            <input class="input-field lic-plain" type="password" name="confirm" placeholder="Confirm password" minlength="8" autocomplete="new-password" required aria-label="Confirm password">
-            <button class="btn-primary" type="submit">Create account</button>
-        </div>
-    </form>
-    <p class="lic-small" style="margin:10px 0 0">After you create the account, the seller gives you access (monthly, yearly or lifetime).
+    <p class="lic-small" style="margin:10px 0 0">Do not have a key yet? Email the seller{% if support %} (<b>{{ support }}</b>){% endif %} with your name{% if account_email %} and <b>{{ account_email }}</b>{% endif %}; the key is sent to your email.
         {% if buy_url %}<a href="{{ buy_url }}" target="_blank" rel="noopener">Buy or renew</a>.{% endif %}</p>
-</div>
-
-<div class="premium-card lic-card">
-    <details>
-        <summary>I have a license key instead</summary>
-        <form method="post" action="{% url 'admin:licensing_activate' %}" class="lic-row" style="margin-top:12px">
-            {% csrf_token %}
-            <input class="input-field" type="text" name="key" placeholder="EXFN-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" spellcheck="false" required aria-label="License key">
-            <button class="btn-primary" type="submit">Activate</button>
-        </form>
-    </details>
 </div>
 {% endif %}
 
-{% if can_manage and has_license and not signed_in %}
+{% if can_manage and has_license %}
 <div class="premium-card lic-card">
     <details>
         <summary>Move this license to another PC</summary>
         <p class="lic-small" style="margin:10px 0">Deactivating releases the license so you can activate it on a new computer. This PC will stop working until it is activated again. Your indexed data is not deleted.</p>
         <form method="post" action="{% url 'admin:licensing_deactivate' %}">{% csrf_token %}
             <button class="btn-secondary" type="submit" style="height:40px;padding:0 20px">Deactivate this PC</button>
-        </form>
-    </details>
-</div>
-{% endif %}
-
-{% if can_manage and signed_in %}
-<div class="premium-card lic-card">
-    <details>
-        <summary>Use this account on another PC</summary>
-        <p class="lic-small" style="margin:10px 0">Signing out frees your account so you can sign in on a different computer. This PC will stop working until you sign in again. Your indexed data is not deleted.</p>
-        <form method="post" action="{% url 'admin:licensing_deactivate' %}">{% csrf_token %}
-            <button class="btn-secondary" type="submit" style="height:40px;padding:0 20px">Sign out of this PC</button>
         </form>
     </details>
 </div>
@@ -161,8 +112,8 @@
 <div class="premium-card lic-card">
     <h3>What the license check sends</h3>
     <p class="lic-small" style="margin:0">To verify your license, this app contacts <code>{{ server_url|default:"the license server" }}</code> and sends only:
-        your <b>account email</b> (or license key), this <b>PC&rsquo;s anonymous ID</b> and <b>name</b>, the <b>app version</b> ({{ version }}), and two <b>counters</b>
-        (how many searches and scans were run: {{ state.searches_total }} and {{ state.scans_total }} so far).
+        your <b>license key</b>, this <b>PC&rsquo;s anonymous ID</b> and <b>name</b>, the <b>app version</b> ({{ version }}), and three <b>counters</b>
+        (how many searches and scans were run: {{ state.searches_total }} and {{ state.scans_total }} so far; and how many Excel files are in your index).
         <br><b>It never sends your Excel files, file names, folder paths or the numbers you search.</b> All of that stays on this PC.</p>
     {% if support %}<p class="lic-small" style="margin:10px 0 0">Need help? Contact <b>{{ support }}</b>.</p>{% endif %}
 </div>

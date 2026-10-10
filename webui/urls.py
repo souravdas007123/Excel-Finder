@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
+    path("forgot/", views.forgot_password, name="forgot"),
     path("dashboard/stats/", views.dashboard_stats, name="dashboard_stats"),
 
     path("scan/", scan_views.scan_page, name="scan"),
@@ -29,10 +30,9 @@ urlpatterns = [
     path("history/<int:task_id>/", views.history_detail, name="history_detail"),
 
     path("license/", license_views.license_page, name="license"),
-    path("license/panel/", license_views.license_panel, name="license_panel"),
     path("license/check/", license_views.license_check, name="license_check"),
-    path("license/login/", license_views.license_login, name="license_login"),
-    path("license/signout/", license_views.license_signout, name="license_signout"),
+    path("license/activate/", license_views.license_activate, name="license_activate"),
+    path("license/deactivate/", license_views.license_deactivate, name="license_deactivate"),
 
     path("updates/check/", license_views.update_check_now, name="update_check"),
     path("updates/dismiss/", license_views.update_dismiss, name="update_dismiss"),

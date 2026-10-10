@@ -8,7 +8,6 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
-from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from fileindex import views as core
@@ -24,6 +23,7 @@ from . import helpers, search_views
 from .templatetags import webui_tags
 
 HX = {"HTTP_HX_REQUEST": "true"}
+GOOD_KEY = "EXFN-ABCDE-FGHJK-LMNPQ-RSTUV"
 
 
 def hx(target=None, **extra):
@@ -609,82 +609,103 @@ class SearchTests(UiTestCase):
 
 # ------------------------------------------------------------------ license page
 class LicensePageTests(UiTestCase):
+    ENFORCED = dict(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
+
     def test_not_enforced_page(self):
         r = self.client.get("/app/license/")
         self.assertContains(r, "License checks are switched off")
         self.assertContains(r, "Check for updates")
-        self.assertNotContains(r, "Sign in to your account")         # development copy me forms ka koi kaam nahi
+        self.assertNotContains(r, "Activate your license")             # development copy me form ka koi kaam nahi
 
-    @override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
-    def test_signed_out_shows_only_sign_in(self):
+    @override_settings(**ENFORCED)
+    def test_without_a_key_the_page_asks_for_it_and_says_how_to_get_one(self):
         service.invalidate()
-        r = self.client.get("/app/license/")
-        self.assertContains(r, "Not signed in")
-        self.assertContains(r, "Sign in to your account")
-        self.assertContains(r, "no account yet")
-        self.assertNotContains(r, "Create an account")              # account sirf pehli baar (/setup/) par banta hai
-        self.assertNotContains(r, "license key instead")
+        LicenseState.objects.update_or_create(pk=1, defaults=dict(account_name="Ravi Kumar", account_email="ravi@example.com"))
+        with override_settings(LICENSE_SUPPORT="help@example.com"):
+            r = self.client.get("/app/license/")
+        self.assertContains(r, "Key needed")
+        self.assertContains(r, "Activate your license")
+        self.assertContains(r, "Don't have a key yet?")
+        self.assertContains(r, "help@example.com")
+        self.assertContains(r, "Ravi Kumar &lt;ravi@example.com&gt;")
+        self.assertNotContains(r, "Check now")                           # abhi koi license hi nahi
+        self.assertNotContains(r, "Create an account")
+        self.assertNotContains(r, "Sign in")
 
-    @override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
-    def test_signed_in_hides_the_sign_in_form_and_offers_sign_out(self):
-        LicenseState.objects.update_or_create(pk=1, defaults=dict(account_email="ravi@example.com", device_token="d",
-                                                                  blocked_code="pending", blocked_message="Waiting"))
-        service.invalidate()
-        r = self.client.get("/app/license/")
-        self.assertNotContains(r, "Sign in to your account")
-        self.assertContains(r, "Sign out of this PC")
+    @override_settings(**ENFORCED)
+    def test_active_license_shows_details_and_hides_the_key_form(self):
+        with mock.patch.object(service, "current_status", return_value=protocol.LicenseStatus(
+                "active", True, "License is active.", license_type="yearly", customer="Ravi Kumar", days_left=200)):
+            LicenseState.objects.update_or_create(pk=1, defaults=dict(license_key=GOOD_KEY, token="t"))
+            r = self.client.get("/app/license/")
+        self.assertContains(r, "Active")
+        self.assertContains(r, "Yearly plan")
+        self.assertContains(r, "200 days left")
         self.assertContains(r, "Check now")
+        self.assertContains(r, "Move this license to another PC")
+        self.assertNotContains(r, "Activate your license")
+        self.assertNotContains(r, GOOD_KEY)                              # puri key kabhi nahi dikhti
 
-    @override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
+    @override_settings(**ENFORCED)
+    def test_cancelled_license_says_so_and_still_lets_you_enter_a_new_key(self):
+        LicenseState.objects.update_or_create(pk=1, defaults=dict(
+            license_key=GOOD_KEY, token="t", blocked_code="revoked", blocked_message="Cancelled: refund."))
+        service.invalidate()
+        r = self.client.get("/app/license/")
+        self.assertContains(r, "Cancelled")
+        self.assertContains(r, "refund")
+        self.assertContains(r, "Activate your license")
+        self.assertContains(r, "Enter your current key")
+
+    @override_settings(**ENFORCED)
     def test_staff_who_is_not_an_admin_sees_no_forms(self):
         service.invalidate()
         self.client.force_login(self.staff)
-        self.assertNotContains(self.client.get("/app/license/"), "Sign in to your account")
-
-    @override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
-    def test_pending_panel_refreshes_itself_and_redirects_when_approved(self):
-        LicenseState.objects.update_or_create(pk=1, defaults=dict(
-            account_email="ravi@example.com", device_token="d", blocked_code="pending", blocked_message="Waiting"))
-        service.invalidate()
-        r = self.client.get("/app/license/")
-        self.assertContains(r, "Waiting for approval")
-        self.assertContains(r, 'hx-trigger="every 30s"')
-        self.assertContains(r, "ravi@example.com")
-        # plan mil gaya
-        LicenseState.objects.filter(pk=1).update(blocked_code="")
-        with mock.patch.object(service, "current_status", return_value=protocol.LicenseStatus("active", True, "ok")):
-            ok = self.client.get("/app/license/panel/?from=pending", **HX)
-        self.assertEqual((ok.status_code, ok["HX-Redirect"]), (204, "/app/"))
+        self.assertNotContains(self.client.get("/app/license/"), "Activate your license")
 
     def test_actions_are_superuser_only(self):
         self.client.force_login(self.staff)
-        for name in ("check", "login", "signout"):
-            with mock.patch.object(service, "login") as lg:
-                r = self.client.post(f"/app/license/{name}/", {"email": "a@b.co", "password": "x"}, **HX)
+        for name in ("check", "activate", "deactivate"):
+            with mock.patch.object(service, "activate") as act, mock.patch.object(service, "deactivate") as deact:
+                r = self.client.post(f"/app/license/{name}/", {"key": GOOD_KEY}, **HX)
             self.assertContains(r, "Only an administrator", msg_prefix=name)
-            lg.assert_not_called()
+            act.assert_not_called(); deact.assert_not_called()
 
-    def test_creating_an_account_and_key_activation_are_not_part_of_this_page(self):
-        for name in ("register", "activate"):
+    def test_removed_account_endpoints_are_gone(self):
+        for name in ("register", "login", "signout", "panel"):
             self.assertEqual(self.client.post(f"/app/license/{name}/", {}, **HX).status_code, 404, name)
 
-    def test_sign_in_and_check_use_the_service(self):
-        ok = service.Result(True, "Signed in. Monthly plan")
-        with mock.patch.object(service, "login", return_value=ok) as lg:
-            r = self.client.post("/app/license/login/", {"email": "a@b.co", "password": "Str0ng-Pass-77"}, **HX)
-        lg.assert_called_once_with("a@b.co", "Str0ng-Pass-77")
-        self.assertContains(r, "Signed in")
+    def test_activating_a_key_opens_the_app(self):
+        ok = service.Result(True, "License activated: Yearly plan.")
+        with mock.patch.object(service, "activate", return_value=ok) as act, \
+                mock.patch.object(service, "current_status", return_value=protocol.LicenseStatus("active", True, "ok")), \
+                override_settings(**self.ENFORCED):
+            r = self.client.post("/app/license/activate/", {"key": GOOD_KEY}, **HX)
+        act.assert_called_once_with(GOOD_KEY)
+        self.assertEqual((r.status_code, r["HX-Redirect"]), (204, "/app/"))
+        self.assertIn("License activated", json.loads(r["HX-Trigger"])["toast"]["message"])
+
+    @override_settings(**ENFORCED)
+    def test_a_wrong_key_stays_on_the_page_with_the_reason(self):
+        service.invalidate()
+        bad = service.Result(False, "This license key is not valid. Please check it and try again.")
+        with mock.patch.object(service, "activate", return_value=bad):
+            r = self.client.post("/app/license/activate/", {"key": "EXFN-AAAAA-AAAAA-AAAAA-AAAAA"}, **HX)
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "not valid")
+        self.assertContains(r, "toast-bad")
         self.assertContains(r, 'id="license-panel"')
+        self.assertNotIn("HX-Redirect", r)
+
+    def test_check_and_deactivate_use_the_service(self):
         with mock.patch.object(service, "check_now", return_value=service.Result(False, "Could not reach the license server.")):
             r = self.client.post("/app/license/check/", **HX)
         self.assertContains(r, "Could not reach")
         self.assertContains(r, "toast-bad")
-
-    def test_signing_out_goes_through_the_service(self):
-        with mock.patch.object(service, "deactivate", return_value=service.Result(True, "This PC has been signed out.")) as out:
-            r = self.client.post("/app/license/signout/", **HX)
+        with mock.patch.object(service, "deactivate", return_value=service.Result(True, "This PC has been deactivated.")) as out:
+            r = self.client.post("/app/license/deactivate/", **HX)
         out.assert_called_once_with()
-        self.assertContains(r, "signed out")
+        self.assertContains(r, "deactivated")
 
     def test_update_check_and_dismiss_swap_the_banner(self):
         with override_settings(UPDATE_CHECK_URL=""):
@@ -713,6 +734,77 @@ class LicensePageTests(UiTestCase):
         self.assertContains(r, "Excel Finder 1.2.0 is available")
         self.assertContains(r, "This update is required")
         self.assertNotContains(r, "Not now")
+
+
+# ------------------------------------------------------------------ password bhool gaye (reset code)
+@override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="x", LICENSE_SERVER_URL="https://license.example.test")
+class ForgotPasswordTests(UiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client.logout()
+        self.owner = get_user_model().objects.create_superuser("ravi@example.com", "ravi@example.com", "Old-Pass-12345")
+        service.invalidate()
+
+    DATA = {"email": "ravi@example.com", "code": "ABCD-EFGH", "password": "Brand-New-Pass-77", "confirm": "Brand-New-Pass-77"}
+
+    def reset(self, **change):
+        return self.client.post("/app/forgot/", {**self.DATA, **change})
+
+    def test_page_explains_the_steps_and_login_links_to_it(self):
+        r = self.client.get("/app/forgot/")
+        self.assertContains(r, "Reset your password")
+        self.assertContains(r, "Email the seller")
+        self.assertContains(r, 'name="code"')
+        self.assertContains(self.client.get("/app/login/"), 'href="/app/forgot/"')
+
+    def test_page_is_open_without_a_license_and_without_signing_in(self):
+        self.assertEqual(self.client.get("/app/forgot/").status_code, 200)       # license band hone par bhi
+
+    def test_right_code_sets_the_new_password_on_this_pc(self):
+        with mock.patch.object(service, "reset_password_code_ok", return_value=service.Result(True, "ok")) as check:
+            r = self.reset()
+        check.assert_called_once_with("ravi@example.com", "ABCD-EFGH")
+        self.assertContains(r, "Password changed")
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password("Brand-New-Pass-77"))
+        self.assertFalse(self.owner.check_password("Old-Pass-12345"))
+        self.assertTrue(self.client.login(username="ravi@example.com", password="Brand-New-Pass-77"))
+
+    def test_wrong_or_expired_code_changes_nothing(self):
+        with mock.patch.object(service, "reset_password_code_ok", return_value=service.Result(False, "That reset code is not valid or has expired.")):
+            r = self.reset()
+        self.assertContains(r, "not valid or has expired")
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password("Old-Pass-12345"))
+
+    def test_local_mistakes_never_use_up_the_code(self):
+        with mock.patch.object(service, "reset_password_code_ok") as check:
+            self.assertContains(self.reset(email="nobody@example.com"), "No user with this email")
+            self.assertContains(self.reset(confirm="Different-Pass-1"), "do not match")
+            self.assertContains(self.reset(password="short", confirm="short"), "too short")
+            self.assertContains(self.reset(password="password", confirm="password"), "too common")
+            self.assertContains(self.reset(code=""), "enter your email and the reset code")
+        check.assert_not_called()
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password("Old-Pass-12345"))
+
+    def test_email_is_matched_ignoring_case(self):
+        with mock.patch.object(service, "reset_password_code_ok", return_value=service.Result(True, "ok")):
+            self.assertContains(self.reset(email="Ravi@Example.COM"), "Password changed")
+
+    def test_offline_gives_the_reason(self):
+        with mock.patch.object(service, "reset_password_code_ok", return_value=service.Result(False, "Could not reach the license server.")):
+            self.assertContains(self.reset(), "Could not reach")
+
+    @override_settings(LICENSE_ENFORCED=False)
+    def test_development_copy_has_no_reset_code(self):
+        r = self.client.get("/app/forgot/")
+        self.assertContains(r, "development copy")
+        self.assertNotContains(r, 'name="code"')
+        with mock.patch.object(service, "reset_password_code_ok") as check:
+            self.reset()
+        check.assert_not_called()
+        self.assertContains(self.client.get("/app/login/"), "Ask the person who installed")
 
 
 # ------------------------------------------------------------------ license gate on /app/

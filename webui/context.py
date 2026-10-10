@@ -1,11 +1,9 @@
-from django.conf import settings
-
 from licensing import service
 from search.version import VERSION
 
 
 def shell(request):
-    """Har naye-UI page ke side menu ke liye: version, license chip."""
+    """Har naye-UI page ke side menu ke liye: version, license chip, expiry ki chetavni."""
     user = getattr(request, "user", None)
     if user is None or not user.is_authenticated or not request.path.startswith("/app/"):
         return {}
@@ -16,9 +14,9 @@ def shell(request):
         sub = (f"{status.days_left} day{'s' if status.days_left != 1 else ''} left" if status.days_left is not None
                else ("Never expires" if status.license_type == "lifetime" else ""))
         chip = {"tone": "warn" if status.warn else "ok", "text": status.type_label or "Active", "sub": sub}
-    elif status.code == "pending":
-        chip = {"tone": "warn", "text": "Waiting for approval", "sub": "Seller will activate your plan"}
+    elif status.code == "unlicensed":
+        chip = {"tone": "warn", "text": "License key needed", "sub": "Ask the seller for a key"}
     else:
         chip = {"tone": "bad", "text": "License problem", "sub": status.message[:60]}
-    return {"app_version": VERSION, "license_chip": chip, "license_ok": status.ok or not service.enforced(),
-            "can_use_admin": user.is_staff}
+    return {"app_version": VERSION, "license_chip": chip, "can_use_admin": user.is_staff,
+            "license_warn": status.warn if service.enforced() and status.ok else ""}

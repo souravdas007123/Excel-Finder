@@ -92,7 +92,6 @@ if not LICENSE_PRIVATE_KEY and (_HERE / "private_key.txt").exists():
 
 MONTHLY_DAYS = 30          # monthly plan kitne din ka
 YEARLY_DAYS = 365          # yearly license kitne din ka (pehli activation se)
-TRIAL_DAYS = 14            # free trial
 OFFLINE_GRACE_DAYS = 14    # server se bina check kiye app kitne din chal sakta hai
 RATE_LIMIT_PER_MINUTE = 40   # ek IP se ek minute me itni requests (guess / spam rokne ke liye)
 TRUST_PROXY_HEADERS = _env_bool("LICENSE_SERVER_TRUST_PROXY", False)   # nginx ke peeche ho toh 1
