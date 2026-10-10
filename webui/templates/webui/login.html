@@ -1,0 +1,31 @@
+{% load static webui_tags %}<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in | Excel Finder</title>
+<script>(function () { try { document.documentElement.setAttribute("data-theme", localStorage.getItem("ef-theme") === "light" ? "light" : "dark"); } catch (e) {} })();</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b8def'/%3E%3Cpath d='M9 10h14M9 16h14M9 22h8' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="{% static 'webui/app.css' %}">
+</head>
+<body>
+{% include "webui/partials/_icons.html" %}
+<div class="auth">
+    <div class="auth-card">
+        <div class="brand"><span class="brand-mark">{% icon "files" 18 %}</span> Excel Finder</div>
+        <h1>Welcome back</h1>
+        <p class="muted">Sign in to find phone numbers across your Excel files.</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next }}">
+            {% if form.non_field_errors %}<ul class="errorlist">{% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+            {% if form.errors and not form.non_field_errors %}<ul class="errorlist"><li>Please check your email / username and password.</li></ul>{% endif %}
+            <div><label class="field" for="id_username">Email or username</label>{{ form.username }}</div>
+            <div><label class="field" for="id_password">Password</label>{{ form.password }}</div>
+            <button class="btn btn-primary btn-lg" type="submit">Sign in</button>
+        </form>
+        <p class="hint" style="margin-top:18px">Forgot your password? Contact the seller of this app.</p>
+    </div>
+</div>
+</body>
+</html>

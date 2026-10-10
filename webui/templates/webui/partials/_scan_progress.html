@@ -1,0 +1,38 @@
+{% load webui_tags %}
+<div class="progress-card"{% if running %} hx-get="{% url 'webui:scan_status' %}?task={{ task.id }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+{% if running %}
+    <div class="scan-line">
+        <span>{% if stopping %}Stopping… saving what is done so far{% else %}Scanning your files, please wait…{% endif %}</span>
+        <span class="row">
+            <span class="muted mono">Elapsed {{ s.elapsed|clock }}</span>
+            {% if not stopping %}<button type="button" class="btn btn-danger btn-sm" hx-post="{% url 'webui:scan_stop' %}" hx-target="closest .progress-card" hx-swap="outerHTML">{% icon "stop" 14 %} Stop scan</button>{% endif %}
+        </span>
+    </div>
+    <div class="progress{% if bar.indeterminate %} indeterminate{% endif %}"><span style="width:{{ bar.percent }}%"></span></div>
+    <div class="hint" style="margin-top:8px;font-variant-numeric:tabular-nums">{{ bar.text }}</div>
+    <div class="chips" style="margin-top:12px">
+        <span class="pill">{{ s.folders_scanned|comma }} folders</span>
+        <span class="pill ok">{{ s.files_indexed|comma }} indexed</span>
+        <span class="pill">{{ s.files_skipped|comma }} unchanged</span>
+        <span class="pill {% if s.files_failed %}bad{% endif %}">{{ s.files_failed|comma }} failed</span>
+    </div>
+    {% if s.message %}<div class="scan-file" title="{{ s.message }}">Reading: {{ s.message }}</div>{% endif %}
+{% else %}
+    <div class="alert {% if task.status == 'Completed' %}ok{% elif task.status == 'Cancelled' %}warn{% else %}bad{% endif %}">
+        {% icon "check" 18 %}
+        <div class="grow">
+            <b>{% if task.status == "Completed" %}Scan complete{% elif task.status == "Cancelled" %}Scan stopped{% else %}Scan failed{% endif %}</b>
+            <span class="muted"> in {{ s.elapsed|clock }}</span>
+            <div class="chips" style="margin-top:10px">
+                <span class="pill ok">{{ s.files_indexed|comma }} indexed</span>
+                <span class="pill">{{ s.files_skipped|comma }} unchanged</span>
+                <span class="pill {% if s.files_failed %}bad{% endif %}">{{ s.files_failed|comma }} failed</span>
+            </div>
+            {% if task.status == "Error" and s.message %}<div class="hint" style="margin-top:8px">{{ s.message }}</div>{% endif %}
+            {% if task.status == "Cancelled" %}<div class="hint" style="margin-top:8px">Files already indexed are kept. Scan again to continue: unchanged files are skipped quickly.</div>{% endif %}
+        </div>
+        {% if task.status == "Completed" %}<a class="btn btn-primary btn-sm" href="{% url 'webui:search' %}" {% navattrs %}>Search numbers {% icon "arrow" 14 %}</a>{% endif %}
+    </div>
+{% endif %}
+</div>
+{% include "webui/partials/_scan_start_btn.html" with oob=True disabled=running %}

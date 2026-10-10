@@ -1,0 +1,10 @@
+{% load webui_tags %}<div id="numbers-box">
+    <textarea id="numbers" name="numbers" data-min="{{ min_digits|default:5 }}" rows="8" spellcheck="false" placeholder="Paste numbers here, one per line (or separated by commas):&#10;9856325417&#10;8569741235">{{ numbers }}</textarea>
+    <div id="num-counter" class="hint" style="margin-top:6px">0 numbers detected</div>
+    {% if note %}
+    <div class="alert {{ note_kind|default:'info' }}" style="margin-top:10px">
+        <div class="grow">{{ note }}</div>
+        {% if big_file %}<button type="submit" class="btn btn-primary btn-sm" form="search-form" formaction="/admin/file-report-api/" formmethod="post" formenctype="multipart/form-data">{% icon "download" 14 %} Full Excel report</button>{% endif %}
+    </div>
+    {% endif %}
+</div>

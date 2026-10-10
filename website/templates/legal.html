@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page_title }} | {{ product_name }}</title>
+{{ robots_html }}
+<link rel="canonical" href="{{ site_url }}/{{ page_file }}">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+{{ preview_banner_html }}
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="assets/favicon.svg" width="30" height="30" alt="">{{ product_name }}</a>
+    <nav class="nav" aria-label="Main"><a class="btn small" href="./#download">Download</a></nav>
+  </div>
+</header>
+<main class="wrap legal">
+{{ draft_banner_html }}
+{{ body_html }}
+</main>
+<footer>
+  <div class="wrap">
+    <div>&copy; {{ year }} {{ company }}</div>
+    <div><a href="./">Home</a> &middot; <a href="privacy.html">Privacy Policy</a> &middot; <a href="terms.html">Terms</a></div>
+  </div>
+</footer>
+</body>
+</html>

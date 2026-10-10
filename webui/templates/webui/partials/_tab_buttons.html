@@ -1,0 +1,4 @@
+{% load webui_tags %}
+<button type="button" class="tab{% if tab == 'files' %} active{% endif %}" role="tab" hx-get="{% url 'webui:search_tab' token 'files' %}" hx-target="#results-pane" hx-swap="innerHTML">By file <span class="count">{{ s.files|comma }}</span></button>
+{% if s.detail %}<button type="button" class="tab{% if tab == 'numbers' %} active{% endif %}" role="tab" hx-get="{% url 'webui:search_tab' token 'numbers' %}" hx-target="#results-pane" hx-swap="innerHTML">By number <span class="count">{{ s.searched|comma }}</span></button>{% endif %}
+<button type="button" class="tab{% if tab == 'missing' %} active{% endif %}" role="tab" hx-get="{% url 'webui:search_tab' token 'missing' %}" hx-target="#results-pane" hx-swap="innerHTML">Not found <span class="count">{{ s.not_found|comma }}</span></button>

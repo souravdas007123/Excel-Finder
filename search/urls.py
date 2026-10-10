@@ -1,8 +1,21 @@
 from django.contrib import admin
-from django.urls import path
+from django.urls import path,include
+from django.views.generic import RedirectView
 from fileindex import views 
+from . import setup_views, update_views
+
+admin.site.site_header = 'Excel Finder'       # upar ki bar me 'Django administration' ki jagah
+admin.site.site_title = 'Excel Finder'
+admin.site.index_title = 'Welcome'
 
 urlpatterns = [
+    path('', RedirectView.as_view(url='/app/')),
+    path('app/', include('webui.urls')),
+    path('setup/', setup_views.setup, name='setup'),
+    path('admin/update/check/', update_views.check, name='update_check'),
+    path('admin/update/install/', update_views.install, name='update_install'),
+    path('admin/update/status/', update_views.status, name='update_status'),
+    path('admin/update/dismiss/', update_views.dismiss, name='update_dismiss'),
     path('admin/start-scan-api/', views.start_scan_api, name='start_scan'),
     path('admin/check-task/<int:task_id>/', views.check_scan_status, name='check_scan'),
     

@@ -8,6 +8,7 @@ WORKFLOW = [
     ("Step 1 · Scan Your Files", [("fileindex.FileIndex", "1. Scan & Index Files")]),
     ("Step 2 · Search Numbers", [("fileindex.BulkSearch", "2. Bulk Number Search")]),
     ("History", [("fileindex.ScanTask", "Scan History")]),
+    ("License", [("licensing.LicenseState", "License & Activation")]),
 ]
 
 # Baaki apps (neeche dikhte hain) ke naam

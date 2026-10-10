@@ -1,0 +1,10 @@
+{% load webui_tags %}
+<div class="grid cols-4">
+    <div class="card stat"><div class="label">{% icon "files" 16 %} Files indexed</div><div class="value">{{ files|comma }}</div><div class="note">Excel files in your index</div></div>
+    <div class="card stat"><div class="label">{% icon "hash" 16 %} Numbers indexed</div><div class="value">{{ numbers|comma }}</div><div class="note">Searchable phone numbers</div></div>
+    <div class="card stat {% if stale %}warn{% endif %}"><div class="label">{% icon "history" 16 %} Last scan</div>
+        <div class="value" style="font-size:22px;margin-top:14px">{% if last_scan %}{{ last_scan|timeago }}{% else %}Never{% endif %}</div>
+        <div class="note">{% if stale %}Older than {{ stale_days }} days: scan again to catch new files{% elif last_scan %}{{ last_scan|date:"d M Y, H:i" }}{% else %}Run your first scan{% endif %}</div></div>
+    <div class="card stat {% if failed %}bad{% endif %}"><div class="label">{% icon "alert" 16 %} Unreadable files</div><div class="value">{{ failed|comma }}</div>
+        <div class="note">{% if failed and last_task %}<a href="{% url 'webui:history' %}" {% navattrs %}>See which files and why</a>{% else %}In the last scan{% endif %}</div></div>
+</div>

@@ -1,0 +1,33 @@
+DRAFT: YE SIRF EK NAMUNA HAI. ISE KISI VAKEEL SE DEKHWAKAR HI KAAM ME LAO. <...> wali jagah bharo.
+
+EXCEL FINDER: SOFTWARE LICENSE AGREEMENT
+
+1. Parties. This agreement is between <Your Company / Name> ("we") and you, the person or company installing Excel Finder ("you").
+
+2. License. We grant you a non-exclusive, non-transferable license to install and use Excel Finder on the number of computers
+   stated in your license (usually one). The license type (yearly or lifetime) and its validity are shown in the app's License page.
+   - Yearly license: valid for 365 days from first activation, renewable.
+   - Lifetime license: valid for the life of the product version you bought. <Define: includes updates for ... years? / all 1.x versions?>
+   - Free trial: 14 days, once per computer.
+
+3. What you may not do. You may not copy the software to other computers, share or resell your license key, remove or bypass the
+   license checks, reverse engineer or modify the software, or use it for sending unsolicited messages (spam), harassment, or any unlawful purpose.
+
+4. License checks. The software contacts our license server to verify your license. It sends only your license key, an anonymous computer ID and
+   name, the app version, and counters of how many searches and scans were run. It does not send your Excel files, file names, folder paths,
+   or the numbers you search. See our Privacy Policy.
+
+5. Your data. Your files and the search index stay on your computer. You are responsible for the data you search and for having the right to process it.
+
+6. Disabling. We may disable a license that is not paid for, is used outside this agreement, or has been shared. We will tell you why on the License page.
+
+7. Updates and support. <Describe: support hours, how to reach you, how long updates are included.>
+
+8. No warranty; limitation of liability. The software is provided "as is". To the extent allowed by law, we are not liable for lost data or profit,
+   and our total liability is limited to the price you paid for the license in the last 12 months. <Have a lawyer check this clause.>
+
+9. Refunds. <Your refund policy, e.g. within 7 days if the software does not work as described.>
+
+10. Law. This agreement is governed by the laws of India. Courts at <city> have jurisdiction.
+
+Contact: <email / phone>

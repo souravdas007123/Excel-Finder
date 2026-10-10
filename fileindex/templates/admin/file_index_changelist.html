@@ -21,6 +21,9 @@
     .scan-head .nav-link { margin: 0; }
     .scan-meta { font-size: 13px; color: var(--body-quiet-color, #888); margin: 4px 0 14px; }
 
+    .scan-warn { margin-top: 6px; color: #b36b00; }
+    .scan-warn a { font-weight: 600; }
+
     .scan-controls { display: flex; gap: 10px; align-items: center; }
     .scan-controls .input-field { margin: 0; flex: 1; height: 42px; padding: 0 12px; }
     .scan-controls select.input-field { height: 42px; padding: 0 12px; }
@@ -60,6 +63,8 @@
         animation: slide 1.2s ease-in-out infinite;
     }
     @keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+    .progress.determinate > span { animation: none; margin-left: 0; transition: width 0.6s ease; }
+    .scan-eta { margin-top: 8px; font-size: 13px; color: var(--body-quiet-color, #777); font-variant-numeric: tabular-nums; }
     .scan-panel .chips-row { margin: 10px 0 0; gap: 8px; }
     .scan-panel .chip { padding: 3px 12px; font-size: 12px; }
     .scan-file { font-size: 12px; color: var(--body-quiet-color, #777); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -78,6 +83,34 @@
     .btn-danger.busy .spinner { display: inline-block; }
 
     @media (max-width: 640px) { .scan-controls { flex-direction: column; align-items: stretch; } }
+    /* ===== Confirm popup (Clear File Index) ===== */
+    .confirm-overlay {
+        position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center;
+        padding: 16px; background: rgba(0, 0, 0, 0.5);
+    }
+    .confirm-overlay[hidden] { display: none; }
+    .confirm-box {
+        width: 100%; max-width: 440px; padding: 24px; border-radius: 10px;
+        background: var(--body-bg, #fff); color: var(--body-fg, #333);
+        border: 1px solid var(--border-color, #e0e0e0); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    }
+    .confirm-icon {
+        width: 44px; height: 44px; border-radius: 50%; margin-bottom: 14px;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(220, 53, 69, 0.15); color: #dc3545;
+    }
+    .confirm-title { margin: 0 0 8px; font-size: 18px; font-weight: 700; }
+    .confirm-text { margin: 0; font-size: 14px; line-height: 1.55; color: var(--body-quiet-color, #666); }
+    .confirm-text b { color: var(--body-fg, #333); }
+    .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+    .confirm-actions button {
+        height: 40px; padding: 0 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .confirm-cancel { background: transparent; color: var(--body-fg, #333); border: 1px solid var(--border-color, #ccc); }
+    .confirm-cancel:hover { border-color: #417690; }
+    .confirm-ok { background: #dc3545; color: #fff; border: 1px solid #dc3545; }
+    .confirm-ok:hover { background: #bb2d3b; border-color: #bb2d3b; }
+    .confirm-actions button:focus-visible { outline: 3px solid rgba(65, 118, 144, 0.5); outline-offset: 2px; }
 </style>
 
 <div class="custom-tools-wrapper">
@@ -96,6 +129,12 @@
                     <b>{{ stats.files|floatformat:"0g" }}</b> files indexed{% if stats.last_scan %} &middot; Last scan: {{ stats.last_scan|date:"d M Y, H:i" }}{% endif %}
                 {% else %}
                     No files indexed yet. Choose a drive below and start your first scan.
+                {% endif %}
+                {% if last_scan_failed %}
+                    <div class="scan-warn">
+                        &#9888; {{ last_scan_failed.count }} file{{ last_scan_failed.count|pluralize }} could not be read in the last scan.
+                        <a href="{% url 'admin:fileindex_scantask_change' last_scan_failed.id %}">See which files and why</a>
+                    </div>
                 {% endif %}
             </div>
 
@@ -142,7 +181,8 @@
                         <button id="stopScanBtn" type="button" class="btn-danger btn-sm">Stop Scan</button>
                     </span>
                 </div>
-                <div class="progress"><span></span></div>
+                <div id="scanBar" class="progress"><span></span></div>
+                <div id="scanEta" class="scan-eta"></div>
                 <div id="scanCounts" class="chips-row"></div>
                 <div id="scanFile" class="scan-file"></div>
             </div>
@@ -157,6 +197,21 @@
                 </button>
             </div>
             {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Confirm popup: Clear File Index -->
+<div id="confirmOverlay" class="confirm-overlay" hidden>
+    <div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+        <div id="confirmIcon" class="confirm-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+        </div>
+        <h3 id="confirmTitle" class="confirm-title"></h3>
+        <p id="confirmText" class="confirm-text"></p>
+        <div class="confirm-actions">
+            <button id="confirmCancel" type="button" class="confirm-cancel">Cancel</button>
+            <button id="confirmOk" type="button" class="confirm-ok">Yes, clear index</button>
         </div>
     </div>
 </div>
@@ -188,6 +243,49 @@
     const select = $('driveSelect'), panel = $('scanPanel'), statusEl = $('scanStatus');
     const clearBtn = $('clearIndexBtn'), customBox = $('customBox'), stopBtn = $('stopScanBtn');
 
+    // Apna confirm popup (browser ke confirm() ki jagah). Promise<boolean> deta hai.
+    const ICONS = {
+        trash: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>',
+        stop: '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+    };
+    function confirmDialog({ title, html, okText, cancelText, icon }) {
+        const overlay = $('confirmOverlay'), ok = $('confirmOk'), cancel = $('confirmCancel');
+        $('confirmTitle').textContent = title;
+        $('confirmText').innerHTML = html;   // sirf is file ka apna text, user input nahi
+        ok.textContent = okText;
+        cancel.textContent = cancelText || 'Cancel';
+        $('confirmIcon').innerHTML = ICONS[icon || 'trash'];
+        const opener = document.activeElement;
+        overlay.hidden = false;
+        cancel.focus();   // galti se Enter dabane par bhi delete na ho
+
+        return new Promise((resolve) => {
+            function close(result) {
+                overlay.hidden = true;
+                ok.removeEventListener('click', onOk);
+                cancel.removeEventListener('click', onCancel);
+                overlay.removeEventListener('mousedown', onOverlay);
+                document.removeEventListener('keydown', onKey, true);
+                if (opener && opener.focus) opener.focus();
+                resolve(result);
+            }
+            const onOk = () => close(true);
+            const onCancel = () => close(false);
+            const onOverlay = (e) => { if (e.target === overlay) close(false); };
+            function onKey(e) {
+                if (e.key === 'Escape') { e.preventDefault(); close(false); }
+                else if (e.key === 'Tab') {   // focus popup ke andar hi ghume
+                    e.preventDefault();
+                    (document.activeElement === ok ? cancel : ok).focus();
+                }
+            }
+            ok.addEventListener('click', onOk);
+            cancel.addEventListener('click', onCancel);
+            overlay.addEventListener('mousedown', onOverlay);
+            document.addEventListener('keydown', onKey, true);
+        });
+    }
+
     function setStatus(text, color) {
         statusEl.textContent = text || '';
         statusEl.style.color = color || '';
@@ -206,6 +304,11 @@
     }
 
     function setRunning(on) {
+        if (on) {   // naye scan par bar / ETA saaf
+            $('scanBar').classList.remove('determinate');
+            $('scanBar').firstElementChild.style.width = '';
+            $('scanEta').textContent = '';
+        }
         card.classList.toggle('scanning', on);
         panel.hidden = !on;
         btnText.textContent = on ? 'Scanning...' : 'Start Scan';
@@ -215,7 +318,14 @@
     }
 
     stopBtn.addEventListener('click', async () => {
-        if (!confirm('Stop the scan?\n\nFiles that are already indexed will be kept.')) return;
+        const yes = await confirmDialog({
+            title: 'Stop the scan?',
+            html: 'Files that are <b>already indexed will be kept</b>. The file being read right now is skipped, and you can run the scan again later to pick up the rest.',
+            okText: 'Yes, stop scan',
+            cancelText: 'Keep scanning',
+            icon: 'stop',
+        });
+        if (!yes) return;
         stopBtn.disabled = true;
         stopBtn.textContent = 'Stopping...';
         try {
@@ -285,8 +395,16 @@
     /* ---------- CLEAR INDEX ---------- */
     if (clearBtn) {
         clearBtn.addEventListener('click', async () => {
-            if (!confirm('Delete ALL indexed data?\n\nYour Excel files on disk will NOT be deleted, ' +
-                         'but you will need to run a scan again before you can search.')) return;
+            const count = {{ stats.files|default:0 }};
+            const yes = await confirmDialog({
+                title: 'Clear the file index?',
+                html: (count ? `This removes <b>all ${count.toLocaleString()} indexed file${count === 1 ? '' : 's'}</b> and their numbers from the database. `
+                             : 'This removes all indexed data from the database. ') +
+                      'Your Excel files on disk are <b>not</b> deleted, but you will need to run a scan again before you can search.',
+                okText: 'Yes, clear index',
+                icon: 'trash',
+            });
+            if (!yes) return;
             lockControls(true);   // Start Scan, dropdown, folder box sab disable
             clearBtn.classList.add('busy');
             $('clearText').textContent = 'Clearing...';
@@ -326,6 +444,34 @@
             chip(`${t.files_failed} failed`, t.files_failed ? 'bad' : '')
         );
         $('scanFile').textContent = t.message ? 'Reading: ' + t.message : '';
+        renderEta(t);
+    }
+
+    function fmtEta(sec) {
+        if (sec < 45) return 'less than a minute';
+        const m = Math.round(sec / 60);
+        if (m < 60) return '~' + m + ' min';
+        const h = Math.floor(m / 60), r = m % 60;
+        return '~' + h + ' h' + (r ? ' ' + r + ' min' : '');
+    }
+    // Progress bar + "kitna baaki": kul files ki ginti background me hoti hai, tab tak bar ghoomta rehta hai
+    function renderEta(t) {
+        const bar = $('scanBar'), eta = $('scanEta');
+        const done = t.files_indexed + t.files_skipped + t.files_failed;
+        if (t.files_total == null) {
+            bar.classList.remove('determinate');
+            bar.firstElementChild.style.width = '';
+            eta.textContent = 'Counting files' + (t.files_counted ? '... ' + t.files_counted.toLocaleString() + ' Excel files found so far' : '...');
+            return;
+        }
+        const total = Math.max(t.files_total, done);   // gin-ti aur scan ke beech file badal jaye toh bar 100% se upar na jaye
+        bar.classList.add('determinate');
+        bar.firstElementChild.style.width = (total ? Math.min(100, done / total * 100) : 100).toFixed(1) + '%';
+        let text = `${done.toLocaleString()} of ${total.toLocaleString()} files`;
+        if (done >= 3 && t.elapsed >= 3 && done < total) {
+            text += ` \u00B7 ${fmtEta((total - done) / (done / t.elapsed))} left`;
+        }
+        eta.textContent = text;
     }
 
     function watch(taskId) {

@@ -1,0 +1,15 @@
+{% extends "webui/base.html" %}
+{% load webui_tags %}
+{% block title %}Indexed files | Excel Finder{% endblock %}
+{% block heading %}Indexed files{% endblock %}
+{% block subheading %}<div class="sub">{{ total_files|comma }} file{{ total_files|pluralize }} in your search index</div>{% endblock %}
+{% block content %}
+<div class="stack">
+    <div class="row">
+        <input type="search" name="q" value="{{ q }}" class="grow" style="max-width:520px"
+               placeholder="Search by file name, folder or phone number…" aria-label="Search indexed files"
+               hx-get="{% url 'webui:files' %}" hx-trigger="input changed delay:300ms, search" hx-target="#files-table" hx-swap="outerHTML" hx-push-url="true">
+    </div>
+    {% include "webui/partials/_files_table.html" %}
+</div>
+{% endblock %}

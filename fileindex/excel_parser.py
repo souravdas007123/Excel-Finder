@@ -14,6 +14,13 @@ except ImportError:
     HAS_CALAMINE = False
 
 MAX_DIGITS = 32
+KEY_DIGITS = 10   # phone match: country code / leading 0 hata kar aakhri 10 digits compare hote hain
+
+
+def match_key(number):
+    """'919856325417', '09856325417', '9856325417' -> teeno ka key '9856325417'. 10 se chhote numbers jaise ke taise."""
+    return number[-KEY_DIGITS:] if len(number) > KEY_DIGITS else number
+
 _SEPARATORS = re.compile(r"[\s\-+()]")
 _DIGITS = re.compile(r"\d+")
 _SKIP_TYPES = (datetime, date, time, timedelta, bool)
@@ -92,7 +99,9 @@ def _collect(rows, min_digits):
                     for n in extract_numbers(str(v), min_digits):
                         hits.add((n, sheet, row_no, col_no))
             # date/bool/None/baaki types skip
-    return list(hits)
+    # Sorted: DB me number ke index me ek order me insert hota hai, set ke random order se kaafi tez (badi file ~30%).
+    # Ye kaam worker process me hota hai, isliye main process (DB likhne wala) par bojh nahi badhta.
+    return sorted(hits)
 
 
 def parse_file(path, min_digits):

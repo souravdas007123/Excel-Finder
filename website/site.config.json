@@ -1,0 +1,30 @@
+{
+  "_help": "Yahan sirf apni details badlo, phir: python website/build_site.py. REPLACE_ME wali sab cheezein badalna zaruri hai. Jab sab theek ho, 'confirmed' ko true karo.",
+
+  "confirmed": false,
+  "legal_reviewed": false,
+
+  "product_name": "Excel Finder",
+  "tagline": "Find any phone number across all your Excel files, in seconds",
+  "company": "REPLACE_ME Your Company Name",
+  "site_url": "https://REPLACE_ME.example.com",
+  "support_email": "REPLACE_ME@example.com",
+  "whatsapp": "",
+
+  "download_url": "",
+  "installer_signed": false,
+  "requirements": "Windows 10 or 11 (64-bit), 4 GB RAM, about 500 MB free disk space",
+
+  "trial_days": 14,
+  "price_yearly": "₹4,999",
+  "price_lifetime": "₹12,999",
+  "price_note": "per PC, all taxes included",
+  "buy_yearly_url": "",
+  "buy_lifetime_url": "",
+  "key_delivery": "within a few hours",
+  "lifetime_note": "REPLACE_ME e.g. Includes all 1.x updates.",
+  "refund_text": "REPLACE_ME e.g. 7-day money-back guarantee if the app does not work as described.",
+
+  "release_notes": ["First public release"],
+  "min_version": ""
+}

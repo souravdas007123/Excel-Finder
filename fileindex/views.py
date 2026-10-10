@@ -14,13 +14,15 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl.utils import get_column_letter
 
+from licensing.service import record_usage
+
 from .drives import get_scan_locations
-from .excel_parser import extract_numbers, parse_file
+from .excel_parser import extract_numbers, match_key, parse_file
 from .models import FileIndex, NumberIndex, ScanTask
 from .report import build_report
-from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, cancel_event, read_row, run_scan, scan_lock
+from .scanner import EXCEL_EXTENSIONS, MIN_DIGITS, cancel_event, read_row, run_scan, scan_lock, scan_progress
 
-MAX_NUMBERS = 100_000       # ek baar me screen par max numbers (file-wise summary chhoti rehti hai)
+MAX_NUMBERS = 2000          # ek baar me max numbers (isse zyada ho toh full Excel report milti hai)
 DETAIL_LIMIT = 2000         # isse zyada numbers par per-number detail nahi bhejte (page tez rahe)
 FILES_LIMIT = 1000          # By File view me max files
 FILE_LIST_CAP = 200         # har file ke liye max itne numbers ki list bhejte hain (count hamesha poora)
@@ -44,45 +46,76 @@ def custom_path_allowed(user):
     return bool(getattr(settings, "SCAN_ALLOW_CUSTOM_PATHS", True) and user.is_superuser)
 
 
-@staff_member_required
-@require_POST
-def start_scan_api(request):
-    key = request.POST.get("location", "")
+def start_scan(user, key, custom_path=""):
+    """Scan shuru karo. (task_id, None, None) ya (None, error text, http status). Admin API aur naya UI dono yahi use karte hain."""
     if key == "__custom__":
-        if not custom_path_allowed(request.user):
-            return JsonResponse({"error": "Specific folder scan is not allowed for your account"}, status=403)
-        raw = request.POST.get("custom_path", "").strip().strip('"')
+        if not custom_path_allowed(user):
+            return None, "Specific folder scan is not allowed for your account", 403
+        raw = (custom_path or "").strip().strip('"')
         root = os.path.normpath(raw) if raw else ""
         if not root or not os.path.isdir(root):
-            return JsonResponse({"error": "Folder not found. Please check the path."}, status=400)
+            return None, "Folder not found. Please check the path.", 400
     else:
         # Client sirf key bhejta hai, asli path server detect karta hai (security)
         location = get_scan_locations().get(key)
         if not location:
-            return JsonResponse({"error": "Invalid location"}, status=400)
+            return None, "Invalid location", 400
         root = str(location["path"])
 
     if not scan_lock.acquire(blocking=False):
-        return JsonResponse({"error": "Another scan or clear operation is already in progress. Please wait."}, status=409)
+        return None, "Another scan or clear operation is already in progress. Please wait.", 409
 
     try:
         # Lock free hai, matlab koi purana 'Running' task server restart se atak gaya tha
         ScanTask.objects.filter(status="Running").update(status="Error", message="Interrupted")
         task = ScanTask.objects.create(status="Running")
         threading.Thread(target=run_scan, args=(task.id, root), daemon=True).start()
+        record_usage("scan")
     except Exception:
         scan_lock.release()
         raise
-    return JsonResponse({"task_id": task.id, "status": "started"})
+    return task.id, None, None
+
+
+def stop_scan():
+    """Chalte hue scan ko rok deta hai. (True, None) ya (False, error text). Jo files index ho chuki hain wo rehti hain."""
+    if not scan_lock.locked():
+        return False, "No scan is running"
+    cancel_event.set()
+    return True, None
+
+
+def scan_status(task):
+    """Ek scan ki halat dict me (JSON API aur naya UI dono ke liye)."""
+    return {
+        "status": task.status,
+        "folders_scanned": task.folders_scanned,
+        "files_indexed": task.files_indexed,
+        "files_skipped": task.files_skipped,
+        "files_failed": task.files_failed,
+        "message": task.message,
+        "elapsed": int((timezone.now() - task.created_at).total_seconds()),
+        # Kul Excel files (ETA ke liye). None = abhi gin rahe hain. Scan khatam hone par zaruri nahi.
+        "files_total": scan_progress["total"] if scan_progress["task_id"] == task.id else None,
+        "files_counted": scan_progress["counted"] if scan_progress["task_id"] == task.id else 0,
+    }
+
+
+@staff_member_required
+@require_POST
+def start_scan_api(request):
+    task_id, error, status = start_scan(request.user, request.POST.get("location", ""), request.POST.get("custom_path", ""))
+    if error:
+        return JsonResponse({"error": error}, status=status)
+    return JsonResponse({"task_id": task_id, "status": "started"})
 
 
 @staff_member_required
 @require_POST
 def stop_scan_api(request):
-    """Chalte hue scan ko rok deta hai. Jo files index ho chuki hain wo rehti hain."""
-    if not scan_lock.locked():
-        return JsonResponse({"error": "No scan is running"}, status=409)
-    cancel_event.set()
+    ok, error = stop_scan()
+    if not ok:
+        return JsonResponse({"error": error}, status=409)
     return JsonResponse({"status": "stopping"})
 
 
@@ -92,35 +125,21 @@ def check_scan_status(request, task_id):
     task = ScanTask.objects.filter(id=task_id).first()
     if not task:
         return JsonResponse({"error": "Task not found"}, status=404)
-    return JsonResponse({
-        "status": task.status,
-        "folders_scanned": task.folders_scanned,
-        "files_indexed": task.files_indexed,
-        "files_skipped": task.files_skipped,
-        "files_failed": task.files_failed,
-        "message": task.message,
-        "elapsed": int((timezone.now() - task.created_at).total_seconds()),
-    })
+    return JsonResponse(scan_status(task))
 
 
-@staff_member_required
-@require_GET
-def browse_folders_api(request):
-    """Folder picker ke liye: diye gaye path ke andar ke sub-folders ki list."""
-    if not custom_path_allowed(request.user):
-        return JsonResponse({"error": "Not allowed"}, status=403)
-
-    path = request.GET.get("path", "").strip()
+def browse_folders(path):
+    """Folder picker: (data dict, None, None) ya (None, error, status). data = {path, parent, folders[]}."""
+    path = (path or "").strip()
     if not path:
         if os.name == "nt":   # Windows: drives ki list
             drives = [f"{c}:\\" for c in string.ascii_uppercase if os.path.exists(f"{c}:\\")]
-            return JsonResponse({"path": "", "parent": None,
-                                 "folders": [{"name": d, "path": d} for d in drives]})
+            return {"path": "", "parent": None, "folders": [{"name": d, "path": d} for d in drives]}, None, None
         path = os.sep
 
     path = os.path.normpath(path)
     if not os.path.isdir(path):
-        return JsonResponse({"error": "Folder not found"}, status=400)
+        return None, "Folder not found", 400
 
     folders = []
     try:
@@ -132,17 +151,47 @@ def browse_folders_api(request):
                 except OSError:
                     continue
     except PermissionError:
-        return JsonResponse({"error": "Permission denied for this folder"}, status=403)
+        return None, "Permission denied for this folder", 403
 
     folders.sort(key=lambda f: f["name"].lower())
     parent = os.path.dirname(path)
     if parent == path:   # root par hain: Windows me drive list, Linux me upar kuch nahi
         parent = "" if os.name == "nt" else None
-    return JsonResponse({"path": path, "parent": parent, "folders": folders[:1000]})
+    return {"path": path, "parent": parent, "folders": folders[:1000]}, None, None
+
+
+@staff_member_required
+@require_GET
+def browse_folders_api(request):
+    """Folder picker ke liye: diye gaye path ke andar ke sub-folders ki list."""
+    if not custom_path_allowed(request.user):
+        return JsonResponse({"error": "Not allowed"}, status=403)
+    data, error, status = browse_folders(request.GET.get("path", ""))
+    if error:
+        return JsonResponse({"error": error}, status=status)
+    return JsonResponse(data)
 
 
 # ------------------------------------------------------------------ search
-def _parse_numbers(raw):
+def _want_last10(request):
+    """Phone match (country code / leading 0 ignore) default ON. Page 'last10=0' bheje toh exact match."""
+    return request.POST.get("last10", "1") != "0"
+
+
+def _dedupe(numbers, last10):
+    """Order maintain karke duplicates hatao. last10 ON ho toh '9856325417' aur '919856325417' ek hi maane jaate hain."""
+    if not last10:
+        return list(dict.fromkeys(numbers))
+    seen, unique = set(), []
+    for n in numbers:
+        k = match_key(n)
+        if k not in seen:
+            seen.add(k)
+            unique.append(n)
+    return unique
+
+
+def _parse_numbers(raw, last10=False):
     """(valid numbers, skipped entries, duplicate count)"""
     numbers, seen, skipped, duplicates = [], set(), [], 0
     for part in re.split(r"[,;\n]+", raw):
@@ -152,11 +201,13 @@ def _parse_numbers(raw):
         n = re.sub(r"\D", "", part)
         if len(n) < MIN_DIGITS:
             skipped.append(part[:40])
-        elif n in seen:
-            duplicates += 1
         else:
-            seen.add(n)
-            numbers.append(n)
+            ident = match_key(n) if last10 else n
+            if ident in seen:
+                duplicates += 1
+            else:
+                seen.add(ident)
+                numbers.append(n)
     return numbers, skipped, duplicates
 
 
@@ -164,65 +215,76 @@ def _fmt_mtime(mtime):
     return datetime.fromtimestamp(mtime).strftime("%d %b %Y, %H:%M") if mtime else ""
 
 
-def _lookup_chunks(numbers, max_hits, file_stats=None):
+def _lookup_chunks(numbers, max_hits, file_stats=None, last10=True):
     """500-500 numbers ka indexed lookup. Har chunk ke liye (numbers, matches, totals, files) yield karta hai.
 
     max_hits=0 : per-number matches nahi banate (badi list me tez).
     file_stats : dict diya ho toh file-wise summary bharta hai:
                  {file_id: {file, folder, modified, numbers_count, matches, numbers[:FILE_LIST_CAP]}}
+    last10     : True = aakhri 10 digits se match (country code / leading 0 ignore). False = poora number exact.
+                 Match ka 'stored' = file me jo number asal me likha hai (searched se alag ho tab).
     """
     for i in range(0, len(numbers), CHUNK):
         chunk = numbers[i:i + CHUNK]
-        rows = NumberIndex.objects.filter(number__in=chunk).values_list(
-            "number", "file_id", "file__file_name", "file__file_path", "file__file_mtime", "sheet", "row", "col"
+        if last10:
+            targets = defaultdict(list)   # key -> search kiye gaye numbers
+            for n in chunk:
+                targets[match_key(n)].append(n)
+            qs = NumberIndex.objects.filter(match_key__in=list(targets))
+        else:
+            targets = None
+            qs = NumberIndex.objects.filter(number__in=chunk)
+        rows = qs.values_list(
+            "number", "match_key", "file_id", "file__file_name", "file__file_path", "file__file_mtime", "sheet", "row", "col"
         )
         matches, totals, files = defaultdict(list), Counter(), defaultdict(set)
         seen_pairs = set()   # (file, number): ek number ek file me kitni bhi baar ho, count 1 baar
-        for number, file_id, name, path, mtime, sheet, row, col in rows.iterator():
-            totals[number] += 1
-            if max_hits:
-                files[number].add(file_id)
-                if len(matches[number]) < max_hits:
-                    matches[number].append({
-                        "file_id": file_id,
-                        "file": name,
-                        "folder": os.path.dirname(path),
-                        "sheet": sheet,
-                        "row": row,
-                        "col": col,
-                        "column": get_column_letter(col) if col else "",
-                        "modified": _fmt_mtime(mtime),
-                    })
-            if file_stats is not None:
-                fs = file_stats.get(file_id)
-                if fs is None:
-                    fs = file_stats[file_id] = {
-                        "file_id": file_id, "file": name, "folder": os.path.dirname(path),
-                        "modified": _fmt_mtime(mtime), "numbers_count": 0, "matches": 0, "numbers": [],
-                    }
-                fs["matches"] += 1
-                pair = (file_id, number)
-                if pair not in seen_pairs:
-                    seen_pairs.add(pair)
-                    fs["numbers_count"] += 1
-                    if len(fs["numbers"]) < FILE_LIST_CAP:
-                        fs["numbers"].append(number)
+        for stored, mkey, file_id, name, path, mtime, sheet, row, col in rows.iterator():
+            for number in (targets[mkey] if last10 else (stored,)):
+                totals[number] += 1
+                if max_hits:
+                    files[number].add(file_id)
+                    if len(matches[number]) < max_hits:
+                        matches[number].append({
+                            "file_id": file_id,
+                            "file": name,
+                            "folder": os.path.dirname(path),
+                            "sheet": sheet,
+                            "row": row,
+                            "col": col,
+                            "column": get_column_letter(col) if col else "",
+                            "modified": _fmt_mtime(mtime),
+                            "stored": stored if stored != number else "",
+                        })
+                if file_stats is not None:
+                    fs = file_stats.get(file_id)
+                    if fs is None:
+                        fs = file_stats[file_id] = {
+                            "file_id": file_id, "file": name, "folder": os.path.dirname(path),
+                            "modified": _fmt_mtime(mtime), "mtime": mtime or 0, "numbers_count": 0, "matches": 0, "numbers": [],
+                        }
+                    fs["matches"] += 1
+                    pair = (file_id, number)
+                    if pair not in seen_pairs:
+                        seen_pairs.add(pair)
+                        fs["numbers_count"] += 1
+                        if len(fs["numbers"]) < FILE_LIST_CAP:
+                            fs["numbers"].append(number)
         for lst in matches.values():   # DB me ORDER BY nahi, chhoti list Python me sort (tez)
             lst.sort(key=lambda m: (m["file"].lower(), m["sheet"], m["row"], m["col"]))
         yield chunk, matches, totals, files
 
 
-@staff_member_required
-@require_POST
-def bulk_search_api(request):
-    numbers, skipped, duplicates = _parse_numbers(request.POST.get("numbers", ""))
+def bulk_search_payload(raw_numbers, last10=True):
+    """Numbers ki list search karke poora jawab (dict) deta hai: JSON API aur naya UI dono isi se chalte hain."""
+    numbers, skipped, duplicates = _parse_numbers(raw_numbers, last10)
     truncated = len(numbers) > MAX_NUMBERS
     numbers = numbers[:MAX_NUMBERS]
     detail = len(numbers) <= DETAIL_LIMIT   # per-number details sirf chhoti list ke liye
     max_hits = (MAX_HITS_PER_NUMBER if len(numbers) <= LARGE_BATCH else MAX_HITS_LARGE) if detail else 0
 
     file_stats, results, not_found, found = {}, [], [], 0
-    for chunk, matches, totals, files in _lookup_chunks(numbers, max_hits, file_stats):
+    for chunk, matches, totals, files in _lookup_chunks(numbers, max_hits, file_stats, last10):
         for n in chunk:
             if totals[n]:
                 found += 1
@@ -238,7 +300,8 @@ def bulk_search_api(request):
                 })
 
     by_file = sorted(file_stats.values(), key=lambda f: (-f["numbers_count"], f["file"].lower()))
-    return JsonResponse({
+    record_usage("search")
+    return {
         "status": "success",
         "summary": {
             "searched": len(numbers),
@@ -252,11 +315,46 @@ def bulk_search_api(request):
             "max_numbers": MAX_NUMBERS,
             "detail": detail,
             "detail_limit": DETAIL_LIMIT,
+            "last10": last10,
         },
         "files": by_file[:FILES_LIMIT],
         "results": results,
         "not_found": not_found,
-    })
+    }
+
+
+@staff_member_required
+@require_POST
+def bulk_search_api(request):
+    return JsonResponse(bulk_search_payload(request.POST.get("numbers", ""), _want_last10(request)))
+
+
+def file_locations(file_id, raw_numbers, last10=True):
+    """Ek file me diye gaye numbers ki jagah: [{number, locations: [{sheet, row, col, column, stored}]}]."""
+    numbers, _, _ = _parse_numbers(raw_numbers, last10)
+    numbers = numbers[:FILE_DETAIL_PAGE]
+
+    if last10:
+        targets = defaultdict(list)
+        for n in numbers:
+            targets[match_key(n)].append(n)
+        qs = NumberIndex.objects.filter(file_id=file_id, match_key__in=list(targets))
+    else:
+        targets = None
+        qs = NumberIndex.objects.filter(file_id=file_id, number__in=numbers)
+    by_number = defaultdict(list)
+    for stored, mkey, sheet, row, col in qs.values_list("number", "match_key", "sheet", "row", "col"):
+        for number in (targets[mkey] if last10 else (stored,)):
+            if len(by_number[number]) < MAX_LOCATIONS_PER_NUMBER:
+                by_number[number].append({"sheet": sheet, "row": row, "col": col,
+                                          "column": get_column_letter(col) if col else "",
+                                          "stored": stored if stored != number else ""})
+    items = []
+    for n in numbers:   # numbers ka order wahi jo list me tha
+        if n in by_number:
+            by_number[n].sort(key=lambda loc: (loc["sheet"], loc["row"], loc["col"]))
+            items.append({"number": n, "locations": by_number[n]})
+    return items
 
 
 @staff_member_required
@@ -267,22 +365,28 @@ def file_locations_api(request):
         file_id = int(request.POST.get("file_id", ""))
     except ValueError:
         return JsonResponse({"error": "Invalid request"}, status=400)
-    numbers, _, _ = _parse_numbers(request.POST.get("numbers", ""))
-    numbers = numbers[:FILE_DETAIL_PAGE]
+    return JsonResponse({"file_id": file_id, "items": file_locations(file_id, request.POST.get("numbers", ""), _want_last10(request))})
 
-    rows = NumberIndex.objects.filter(file_id=file_id, number__in=numbers).values_list(
-        "number", "sheet", "row", "col")
-    by_number = defaultdict(list)
-    for number, sheet, row, col in rows:
-        if len(by_number[number]) < MAX_LOCATIONS_PER_NUMBER:
-            by_number[number].append({"sheet": sheet, "row": row, "col": col,
-                                      "column": get_column_letter(col) if col else ""})
-    items = []
-    for n in numbers:   # numbers ka order wahi jo list me tha
-        if n in by_number:
-            by_number[n].sort(key=lambda loc: (loc["sheet"], loc["row"], loc["col"]))
-            items.append({"number": n, "locations": by_number[n]})
-    return JsonResponse({"file_id": file_id, "items": items})
+
+def row_cells(file_id, sheet, row_no, col=0):
+    """Us row ka poora data file se padhkar: (file, cells, None, None) ya (None, None, error, status)."""
+    f = FileIndex.objects.filter(id=file_id).first()   # path DB se aata hai, client se nahi
+    if not f:
+        return None, None, "File not in index", 404
+    try:
+        headers, values = read_row(f.file_path, sheet, row_no)
+    except FileNotFoundError:
+        return None, None, "File moved or deleted. Run the scan again.", 404
+    except Exception as exc:
+        return None, None, f"Could not read row: {exc}", 500
+
+    cells = []
+    for i in range(min(max(len(headers), len(values)), MAX_DETAIL_CELLS)):
+        h = headers[i] if i < len(headers) else ""
+        v = values[i] if i < len(values) else ""
+        if h or v:
+            cells.append({"col": get_column_letter(i + 1), "header": h, "value": v, "hit": (i + 1) == col})
+    return f, cells, None, None
 
 
 @staff_member_required
@@ -295,24 +399,9 @@ def row_detail_api(request):
         col = int(request.GET.get("col", "0") or 0)
     except ValueError:
         return JsonResponse({"error": "Invalid request"}, status=400)
-
-    f = FileIndex.objects.filter(id=file_id).first()   # path DB se aata hai, client se nahi
-    if not f:
-        return JsonResponse({"error": "File not in index"}, status=404)
-
-    try:
-        headers, values = read_row(f.file_path, request.GET.get("sheet", ""), row_no)
-    except FileNotFoundError:
-        return JsonResponse({"error": "File moved or deleted. Run the scan again."}, status=404)
-    except Exception as exc:
-        return JsonResponse({"error": f"Could not read row: {exc}"}, status=500)
-
-    cells = []
-    for i in range(min(max(len(headers), len(values)), MAX_DETAIL_CELLS)):
-        h = headers[i] if i < len(headers) else ""
-        v = values[i] if i < len(values) else ""
-        if h or v:
-            cells.append({"col": get_column_letter(i + 1), "header": h, "value": v, "hit": (i + 1) == col})
+    _f, cells, error, status = row_cells(file_id, request.GET.get("sheet", ""), row_no, col)
+    if error:
+        return JsonResponse({"error": error}, status=status)
     return JsonResponse({"cells": cells})
 
 
@@ -349,28 +438,35 @@ def _numbers_from_excel(upload, ext, first_col):
     return [h[0] for h in hits]
 
 
-def _read_upload(request):
-    """Upload se numbers nikalta hai. Returns ((file name, unique numbers, duplicates), None) ya (None, error response)."""
-    upload = request.FILES.get("file")
+def read_upload_numbers(upload, first_col=False, last10=True):
+    """Upload se numbers nikalta hai. ((file name, unique numbers, duplicates), None, None) ya (None, error, http status)."""
     if not upload:
-        return None, JsonResponse({"error": "No file received"}, status=400)
+        return None, "No file received", 400
     if upload.size > MAX_UPLOAD_MB * 1024 * 1024:
-        return None, JsonResponse({"error": f"File is too large (max {MAX_UPLOAD_MB} MB)"}, status=413)
+        return None, f"File is too large (max {MAX_UPLOAD_MB} MB)", 413
 
     ext = os.path.splitext(upload.name)[1].lower()
-    first_col = bool(request.POST.get("first_col"))
     try:
         if ext in (".csv", ".txt"):
             found = _numbers_from_text(upload, first_col)
         elif ext in EXCEL_EXTENSIONS:
             found = _numbers_from_excel(upload, ext, first_col)
         else:
-            return None, JsonResponse({"error": "Unsupported file. Use .xlsx, .xls, .csv or .txt"}, status=400)
+            return None, "Unsupported file. Use .xlsx, .xls, .csv or .txt", 400
     except Exception as exc:
-        return None, JsonResponse({"error": f"Could not read file: {exc}"}, status=400)
+        return None, f"Could not read file: {exc}", 400
 
-    unique = list(dict.fromkeys(found))   # order maintain, duplicates hatao
-    return (upload.name, unique, len(found) - len(unique)), None
+    unique = _dedupe(found, last10)   # order maintain, duplicates hatao
+    return (upload.name, unique, len(found) - len(unique)), None, None
+
+
+def _read_upload(request):
+    """Upload se numbers nikalta hai. Returns ((file name, unique numbers, duplicates), None) ya (None, error response)."""
+    result, error, status = read_upload_numbers(request.FILES.get("file"), bool(request.POST.get("first_col")),
+                                                _want_last10(request))
+    if error:
+        return None, JsonResponse({"error": error}, status=status)
+    return result, None
 
 
 @staff_member_required
@@ -411,8 +507,9 @@ def file_report_api(request):
     numbers = numbers[:MAX_FILE_NUMBERS]
     max_hits = EXPORT_MAX_HITS if len(numbers) <= DETAIL_LIMIT else EXPORT_MAX_HITS_HUGE
     file_stats = {}
-    data = build_report(_lookup_chunks(numbers, max_hits, file_stats), len(numbers), [], duplicates,
-                        max_hits, file_stats)
+    last10 = _want_last10(request)
+    data = build_report(_lookup_chunks(numbers, max_hits, file_stats, last10), len(numbers), [],
+                        duplicates, max_hits, file_stats, last10)
     return _xlsx_response(data)
 
 
@@ -420,23 +517,22 @@ def file_report_api(request):
 @staff_member_required
 @require_POST
 def export_excel_api(request):
-    numbers, skipped, duplicates = _parse_numbers(request.POST.get("numbers", ""))
+    last10 = _want_last10(request)
+    numbers, skipped, duplicates = _parse_numbers(request.POST.get("numbers", ""), last10)
     numbers = numbers[:MAX_NUMBERS]
     max_hits = EXPORT_MAX_HITS if len(numbers) <= DETAIL_LIMIT else EXPORT_MAX_HITS_HUGE
     file_stats = {}
-    data = build_report(_lookup_chunks(numbers, max_hits, file_stats), len(numbers), skipped, duplicates,
-                        max_hits, file_stats)
+    data = build_report(_lookup_chunks(numbers, max_hits, file_stats, last10), len(numbers), skipped, duplicates,
+                        max_hits, file_stats, last10)
     return _xlsx_response(data)
 
 
-@staff_member_required
-@require_POST
-def clear_index_api(request):
-    """Poora index (files + numbers) ek jhatke me hatata hai. Disk ki Excel files ko haath nahi lagata."""
-    if not request.user.has_perm("fileindex.delete_fileindex"):
-        return JsonResponse({"error": "You do not have permission to clear the index"}, status=403)
+def clear_index(user):
+    """Poora index hatao. (files_removed, None, None) ya (None, error, http status)."""
+    if not user.has_perm("fileindex.delete_fileindex"):
+        return None, "You do not have permission to clear the index", 403
     if not scan_lock.acquire(blocking=False):   # lock pakda rehta hai, isliye clear ke dauraan naya scan shuru nahi hoga
-        return JsonResponse({"error": "A scan is running. Please wait for it to finish."}, status=409)
+        return None, "A scan is running. Please wait for it to finish.", 409
     try:
         files_removed = FileIndex.objects.count()
         qn = connection.ops.quote_name
@@ -451,4 +547,14 @@ def clear_index_api(request):
                 pass
     finally:
         scan_lock.release()
-    return JsonResponse({"status": "cleared", "files_removed": files_removed})
+    return files_removed, None, None
+
+
+@staff_member_required
+@require_POST
+def clear_index_api(request):
+    """Poora index (files + numbers) ek jhatke me hatata hai. Disk ki Excel files ko haath nahi lagata."""
+    removed, error, status = clear_index(request.user)
+    if error:
+        return JsonResponse({"error": error}, status=status)
+    return JsonResponse({"status": "cleared", "files_removed": removed})

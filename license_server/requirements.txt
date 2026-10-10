@@ -1,0 +1,4 @@
+# License server (seller ke server par). Customer wali app ki requirements.txt alag hai.
+Django>=5.2
+cryptography>=42
+gunicorn>=22        # Linux server par chalane ke liye

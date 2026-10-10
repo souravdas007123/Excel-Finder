@@ -1,0 +1,33 @@
+{% load webui_tags %}
+<div id="history-table">
+{% if page.object_list %}
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Scan</th><th>Status</th><th class="num">Folders</th><th class="num">Indexed</th><th class="num">Unchanged</th><th class="num">Failed</th><th class="hide-sm">Started</th><th></th></tr></thead>
+            <tbody>
+            {% for t in page.object_list %}
+            <tr>
+                <td>#{{ t.id }}</td>
+                <td>{% include "webui/partials/_status_pill.html" with status=t.status %}</td>
+                <td class="num">{{ t.folders_scanned|comma }}</td><td class="num">{{ t.files_indexed|comma }}</td><td class="num">{{ t.files_skipped|comma }}</td>
+                <td class="num">{% if t.files_failed %}<span class="pill bad">{{ t.files_failed|comma }}</span>{% else %}0{% endif %}</td>
+                <td class="hide-sm muted">{{ t.created_at|date:"d M Y, H:i" }}</td>
+                <td class="num">{% if t.files_failed or t.status == "Error" %}<button type="button" class="btn btn-sm" hx-get="{% url 'webui:history_detail' t.id %}" hx-target="#modal-body">Details</button>{% endif %}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if page.paginator.num_pages > 1 %}
+    <div class="pager">
+        <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+        <span class="row">
+            {% if page.has_previous %}<button type="button" class="btn btn-sm" hx-get="{% url 'webui:history' %}?page={{ page.previous_page_number }}" hx-target="#history-table" hx-swap="outerHTML" hx-push-url="true">Previous</button>{% endif %}
+            {% if page.has_next %}<button type="button" class="btn btn-sm" hx-get="{% url 'webui:history' %}?page={{ page.next_page_number }}" hx-target="#history-table" hx-swap="outerHTML" hx-push-url="true">Next</button>{% endif %}
+        </span>
+    </div>
+    {% endif %}
+{% else %}
+    <div class="card empty">{% icon "history" 30 %}<b>No scans yet</b>Your scan history will appear here.</div>
+{% endif %}
+</div>
