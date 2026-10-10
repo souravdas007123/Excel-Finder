@@ -18,5 +18,5 @@ def shell(request):
         chip = {"tone": "warn", "text": "License key needed", "sub": "Ask the seller for a key"}
     else:
         chip = {"tone": "bad", "text": "License problem", "sub": status.message[:60]}
-    return {"app_version": VERSION, "license_chip": chip, "can_use_admin": user.is_staff,
+    return {"app_version": VERSION, "license_chip": chip,
             "license_warn": status.warn if service.enforced() and status.ok else ""}

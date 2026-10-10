@@ -36,10 +36,7 @@
                 <span><b>{{ license_chip.text }}</b><span>{{ license_chip.sub }}</span></span>
             </a>
             {% endif %}
-            <div class="side-meta">
-                <span>v{{ app_version }}</span>
-                {% if can_use_admin %}<a href="/admin/" hx-boost="false" title="Open the classic admin panel">Admin panel {% icon "external" 13 %}</a>{% endif %}
-            </div>
+            <div class="side-meta"><span>v{{ app_version }}</span></div>
             <div class="side-meta">
                 <span>{% icon "user" 14 %} {{ request.user.get_username|truncatechars:22 }}</span>
                 <form method="post" action="{% url 'webui:logout' %}" hx-boost="false">{% csrf_token %}

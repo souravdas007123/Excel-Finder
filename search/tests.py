@@ -107,7 +107,7 @@ class FirstRunSetupTests(TestCase):
         self.addCleanup(first_run.reset_first_run_cache)
 
     def test_every_page_goes_to_setup_while_there_is_no_user(self):
-        for path in ("/", "/admin/", "/admin/login/", "/admin/fileindex/bulksearch/"):
+        for path in ("/", "/admin/", "/admin/login/", "/app/", "/app/search/"):
             r = self.client.get(path)
             self.assertRedirects(r, "/setup/", fetch_redirect_response=False, msg_prefix=path)
         self.assertEqual(self.client.get("/setup/").status_code, 200)

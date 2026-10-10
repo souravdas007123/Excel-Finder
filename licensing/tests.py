@@ -11,7 +11,6 @@ from datetime import timedelta
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.contrib.messages import get_messages
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -108,50 +107,56 @@ class LicenseTestCase(TestCase):
         state.save()
         service.invalidate()
 
-    def messages(self, response):
-        return [str(m) for m in get_messages(response.wsgi_request)]
+    def hx(self, name, data=None, **kw):
+        """Naye UI ka htmx POST (jawab me toast ka text hota hai)."""
+        return self.client.post(reverse(name), data or {}, HTTP_HX_REQUEST="true", **kw)
 
 
 # ------------------------------------------------------------------ pehle: kab block hota hai
 class BlockingTests(LicenseTestCase):
+    PAGES = ("webui:dashboard", "webui:scan", "webui:search", "webui:files", "webui:history")
+
     def test_unlicensed_app_redirects_pages_to_the_license_page(self):
-        license_page = reverse("admin:licensing_licensestate_changelist")
-        for name in ("admin:index", "admin:fileindex_fileindex_changelist", "admin:fileindex_bulksearch_changelist",
-                     "admin:fileindex_scantask_changelist"):
+        license_page = reverse("webui:license")
+        for name in self.PAGES:
             r = self.client.get(reverse(name))
             self.assertRedirects(r, license_page, fetch_redirect_response=False, msg_prefix=name)
         r = self.client.get(license_page)
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "NOT ACTIVATED")
+        self.assertContains(r, "Key needed")
         self.assertContains(r, "Activate your license")
         self.assertNotContains(r, "Create an account")
 
-    def test_apis_answer_402_with_the_reason(self):
-        for name in ("bulk_search", "start_scan", "export_excel", "clear_index"):
-            r = self.client.post(reverse(name), {})
-            self.assertEqual(r.status_code, 402, name)
-            self.assertIn("No license activated", r.json()["error"])
-            self.assertEqual(r.json()["license"], "unlicensed")
+    def test_actions_are_refused_too(self):
+        for name in ("webui:search_run", "webui:scan_start", "webui:scan_clear"):          # htmx: poora page badalkar License par
+            r = self.hx(name, {"numbers": "9856325417"})
+            self.assertEqual((r.status_code, r["HX-Redirect"]), (204, reverse("webui:license")), name)
+        r = self.client.post(reverse("webui:search_export"), {"numbers": "9856325417"})        # normal form: download nahi hota
+        self.assertRedirects(r, reverse("webui:license"), fetch_redirect_response=False)
 
     def test_login_and_logout_stay_open(self):
         self.client.logout()
-        self.assertEqual(self.client.get(reverse("admin:login")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("webui:login")).status_code, 200)
+
+    def test_there_is_no_django_admin_in_the_customer_app(self):
+        self.activate_ok()
+        self.assertEqual(self.client.get("/admin/").status_code, 404)
 
     def test_active_license_opens_everything(self):
         self.activate_ok()
-        for name in ("admin:index", "admin:fileindex_fileindex_changelist", "admin:fileindex_bulksearch_changelist"):
+        for name in self.PAGES:
             self.assertEqual(self.client.get(reverse(name)).status_code, 200, name)
-        self.assertEqual(self.client.post(reverse("bulk_search"), {"numbers": "9856325417"}).status_code, 200)
+        self.assertEqual(self.hx("webui:search_run", {"numbers": "9856325417"}).status_code, 200)
 
     def test_expired_license_is_blocked_and_says_when_it_expired(self):
         now = protocol.utcnow()
         self.store_token(issued=now - timedelta(days=400), expires=now - timedelta(days=2), check_by=now + timedelta(days=5))
-        r = self.client.get(reverse("admin:fileindex_bulksearch_changelist"))
+        r = self.client.get(reverse("webui:search"))
         self.assertEqual(r.status_code, 302)
-        page = self.client.get(reverse("admin:licensing_licensestate_changelist"))
-        self.assertContains(page, "EXPIRED")
+        page = self.client.get(reverse("webui:license"))
+        self.assertContains(page, "Expired")
         self.assertContains(page, "expired on")
-        self.assertEqual(self.client.post(reverse("bulk_search"), {"numbers": "9856325417"}).status_code, 402)
+        self.assertEqual(self.hx("webui:search_run", {"numbers": "9856325417"}).status_code, 204)
 
     def test_a_token_from_another_pc_is_rejected(self):
         self.store_token(machine="b" * 64)
@@ -160,7 +165,7 @@ class BlockingTests(LicenseTestCase):
     def test_a_forged_token_signed_with_another_key_is_rejected(self):
         self.store_token(private=OTHER_PRIVATE)
         self.assertEqual(service.current_status().code, "invalid")
-        self.assertEqual(self.client.get(reverse("admin:index")).status_code, 302)
+        self.assertEqual(self.client.get(reverse("webui:dashboard")).status_code, 302)
 
     def test_editing_the_token_in_the_database_is_detected(self):
         self.activate_ok()
@@ -200,7 +205,7 @@ class BlockingTests(LicenseTestCase):
         status = service.current_status()
         self.assertTrue(status.ok)
         self.assertIsNone(status.expires)
-        page = self.client.get(reverse("admin:licensing_licensestate_changelist"))
+        page = self.client.get(reverse("webui:license"))
         self.assertContains(page, "Never (lifetime)")
 
 
@@ -212,12 +217,12 @@ class ExpiryWarningTests(LicenseTestCase):
         self.assertIn("expires on", status.warn)
         self.assertEqual(status.days_left, 5)
 
-    def test_banner_is_shown_once_a_day(self):
+    def test_warning_is_shown_on_every_page_until_renewed(self):
         self.store_token(expires=protocol.utcnow() + timedelta(days=3))
-        first = self.client.get(reverse("admin:fileindex_fileindex_changelist"))
-        self.assertTrue(any("expires on" in m for m in self.messages(first)))
-        second = self.client.get(reverse("admin:fileindex_fileindex_changelist"))
-        self.assertFalse(any("expires on" in m for m in self.messages(second)))
+        for name in ("webui:dashboard", "webui:scan", "webui:search"):
+            self.assertContains(self.client.get(reverse(name)), "expires on", msg_prefix=name)
+        self.store_token(expires=protocol.utcnow() + timedelta(days=200))
+        self.assertNotContains(self.client.get(reverse("webui:dashboard")), "Please renew")
 
     def test_no_warning_when_far_from_expiry(self):
         self.store_token(expires=protocol.utcnow() + timedelta(days=200))
@@ -226,19 +231,14 @@ class ExpiryWarningTests(LicenseTestCase):
 
 # ------------------------------------------------------------------ server se baat
 class ActivationFlowTests(LicenseTestCase):
-    def post(self, name, data=None, user=None):
-        if user:
-            self.client.force_login(user)
-        return self.client.post(reverse(name), data or {}, follow=True)
-
-    def test_activating_through_the_page(self):
-        r = self.post("admin:licensing_activate", {"key": "  exfn abcde fghjk lmnpq rstuv "})
-        self.assertTrue(any("License activated" in m for m in self.messages(r)))
-        self.assertContains(r, "ACTIVE")
-        self.assertContains(r, "Ravi Traders")
-        state = LicenseState.get()
-        self.assertEqual(state.license_key, GOOD_KEY)
-        self.assertTrue(service.current_status().ok)
+    def test_activating_with_a_key_typed_loosely(self):
+        result = service.activate("  exfn abcde fghjk lmnpq rstuv ")
+        self.assertTrue(result.ok, result.message)
+        self.assertIn("License activated", result.message)
+        self.assertEqual(LicenseState.get().license_key, GOOD_KEY)
+        status = service.current_status(force=True)
+        self.assertTrue(status.ok)
+        self.assertEqual(status.customer, "Ravi Traders")
 
     def test_sent_data_contains_only_the_agreed_fields(self):
         self.server.calls.clear()
@@ -249,8 +249,8 @@ class ActivationFlowTests(LicenseTestCase):
         self.assertEqual(set(payload["usage"]), {"searches_total", "scans_total", "files_indexed"})
 
     def test_wrong_key_shows_the_server_message_and_stays_blocked(self):
-        r = self.post("admin:licensing_activate", {"key": "EXFN-AAAAA-AAAAA-AAAAA-AAAAA"})
-        self.assertTrue(any("not valid" in m for m in self.messages(r)))
+        result = service.activate("EXFN-AAAAA-AAAAA-AAAAA-AAAAA")
+        self.assertIn("not valid", result.message)
         self.assertFalse(service.current_status(force=True).ok)
 
     def test_garbage_key_is_rejected_without_calling_the_server(self):
@@ -277,23 +277,8 @@ class ActivationFlowTests(LicenseTestCase):
         result = service.activate(GOOD_KEY)
         self.assertEqual((result.ok, "already used" in result.message), (False, True))
 
-    def test_only_a_superuser_can_change_the_license(self):
-        r = self.post("admin:licensing_activate", {"key": GOOD_KEY}, user=self.staff)
-        self.assertTrue(any("administrator" in m for m in self.messages(r)))
-        self.assertEqual(LicenseState.get().token, "")
-        self.assertEqual(self.server.calls, [])
-
-    def test_staff_can_view_the_license_page_but_sees_no_forms(self):
-        self.client.force_login(self.staff)
-        r = self.client.get(reverse("admin:licensing_licensestate_changelist"))
-        self.assertEqual(r.status_code, 200)
-        self.assertNotContains(r, "Sign in to your account")
-
-    def test_actions_only_accept_post(self):
-        self.assertEqual(self.client.get(reverse("admin:licensing_activate")).status_code, 405)
-
     def test_what_is_sent_is_explained_on_the_page(self):
-        r = self.client.get(reverse("admin:licensing_licensestate_changelist"))
+        r = self.client.get(reverse("webui:license"))
         self.assertContains(r, "never sends your Excel files")
 
 
@@ -317,9 +302,9 @@ class CheckTests(LicenseTestCase):
         service.invalidate()
         status = service.current_status()
         self.assertEqual((status.code, status.ok), ("revoked", False))
-        self.assertEqual(self.client.get(reverse("admin:index")).status_code, 302)
-        page = self.client.get(reverse("admin:licensing_licensestate_changelist"))
-        self.assertContains(page, "DISABLED")
+        self.assertEqual(self.client.get(reverse("webui:dashboard")).status_code, 302)
+        page = self.client.get(reverse("webui:license"))
+        self.assertContains(page, "Cancelled")
         self.assertContains(page, "Payment failed")
 
     def test_renewal_unblocks_after_the_next_check(self):
@@ -385,11 +370,11 @@ class UsageTests(LicenseTestCase):
     def test_searches_and_scans_are_counted(self):
         self.activate_ok()
         for _ in range(3):
-            self.client.post(reverse("bulk_search"), {"numbers": "9856325417"})
+            self.hx("webui:search_run", {"numbers": "9856325417"})
         from fileindex.scanner import scan_lock
         self.addCleanup(lambda: scan_lock.locked() and scan_lock.release())      # run_scan nakli hai, lock wo chhodta nahi
-        with mock.patch("fileindex.views.run_scan"):
-            self.client.post(reverse("start_scan"), {"location": "__custom__", "custom_path": os.path.dirname(__file__)})
+        with mock.patch("fileindex.services.run_scan"):
+            self.hx("webui:scan_start", {"location": "__custom__", "custom_path": os.path.dirname(__file__)})
         state = LicenseState.get()
         self.assertEqual(state.searches_total, 3)
         self.assertEqual(state.scans_total, 1)
@@ -534,15 +519,15 @@ class NotEnforcedTests(TestCase):
 
     def test_everything_is_open(self):
         self.assertTrue(service.current_status().ok)
-        self.assertEqual(self.client.get(reverse("admin:fileindex_bulksearch_changelist")).status_code, 200)
-        self.assertEqual(self.client.post(reverse("bulk_search"), {"numbers": "9856325417"}).status_code, 200)
+        self.assertEqual(self.client.get(reverse("webui:search")).status_code, 200)
+        self.assertEqual(self.client.post(reverse("webui:search_run"), {"numbers": "9856325417"}, HTTP_HX_REQUEST="true").status_code, 200)
 
     def test_license_page_says_checks_are_off(self):
-        r = self.client.get(reverse("admin:licensing_licensestate_changelist"))
-        self.assertContains(r, "NOT ENFORCED")
+        r = self.client.get(reverse("webui:license"))
+        self.assertContains(r, "Not enforced")
 
     def test_sidebar_has_the_license_link(self):
-        self.assertContains(self.client.get(reverse("admin:index")), "License &amp; Activation")
+        self.assertContains(self.client.get(reverse("webui:dashboard")), reverse("webui:license"))
 
 
 @override_settings(LICENSE_ENFORCED=True, LICENSE_PUBLIC_KEY="")

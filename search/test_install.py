@@ -92,7 +92,7 @@ class BannerTests(InstallTestCase):
         self.release()
         page = self.page()
         self.assertContains(page, "Update now")
-        self.assertContains(page, reverse("update_install"))
+        self.assertContains(page, reverse("webui:update_install"))
         self.assertContains(page, "Download")                    # link bhi rehta hai (bharosa na ho toh browser se)
 
     def test_no_button_without_a_checksum(self):
@@ -218,20 +218,20 @@ class ViewTests(InstallTestCase):
     def test_install_endpoint_starts_and_status_reports(self):
         self.release()
         with mock.patch.object(update_check.threading, "Thread") as thread:
-            r = self.client.post(reverse("update_install"))
+            r = self.client.post(reverse("webui:update_install"))
         self.assertEqual(r.json()["ok"], True)
         thread.return_value.start.assert_called_once()
-        status = self.client.get(reverse("update_status")).json()
+        status = self.client.get(reverse("webui:update_status")).json()
         self.assertEqual(status["state"], "downloading")
 
     def test_install_needs_post_and_a_staff_login(self):
-        self.assertEqual(self.client.get(reverse("update_install")).status_code, 405)
+        self.assertEqual(self.client.get(reverse("webui:update_install")).status_code, 405)
         self.client.logout()
-        self.assertEqual(self.client.post(reverse("update_install")).status_code, 302)
-        self.assertEqual(self.client.get(reverse("update_status")).status_code, 302)
+        self.assertEqual(self.client.post(reverse("webui:update_install")).status_code, 302)
+        self.assertEqual(self.client.get(reverse("webui:update_status")).status_code, 302)
         self.client.force_login(self.outsider)
-        self.assertEqual(self.client.post(reverse("update_install")).status_code, 302)
+        self.assertEqual(self.client.post(reverse("webui:update_install")).status_code, 302)
 
     def test_install_with_nothing_to_install_says_so(self):
-        r = self.client.post(reverse("update_install"))
+        r = self.client.post(reverse("webui:update_install"))
         self.assertFalse(r.json()["ok"])

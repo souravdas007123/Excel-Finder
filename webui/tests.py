@@ -10,7 +10,7 @@ from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from fileindex import views as core
+from fileindex import services as core
 from fileindex.excel_parser import match_key
 from fileindex.models import FileIndex, NumberIndex, ScanFailure, ScanTask
 from fileindex.scanner import scan_lock, scan_progress
@@ -149,10 +149,15 @@ class DashboardTests(UiTestCase):
         ScanTask.objects.create(status="Completed", files_indexed=12)
         self.assertContains(self.client.get("/app/"), "Completed")
 
-    def test_sidebar_has_the_license_chip_and_admin_link(self):
+    def test_sidebar_has_the_license_chip_and_no_admin_link(self):
         r = self.client.get("/app/")
         self.assertContains(r, "Development copy")
-        self.assertContains(r, 'href="/admin/"')
+        self.assertNotContains(r, "/admin/")
+        self.assertNotContains(r, "Manage users")
+
+    def test_the_customer_app_has_no_django_admin(self):
+        for url in ("/admin/", "/admin/login/", "/admin/auth/user/"):
+            self.assertEqual(self.client.get(url).status_code, 404, url)
 
 
 class FilesPageTests(UiTestCase):
@@ -597,14 +602,42 @@ class SearchTests(UiTestCase):
         with mock.patch.object(core, "MAX_NUMBERS", 3):
             r = self.upload("big.csv", ("\n".join(f"70000{i:05d}" for i in range(10))).encode())
         self.assertContains(r, "Full Excel report")
-        self.assertContains(r, "/admin/file-report-api/")
+        self.assertContains(r, "/app/search/report/")
 
-    def test_search_page_posts_exports_to_the_existing_endpoints(self):
+    def test_search_page_posts_exports_to_the_app_endpoints(self):
         r = self.client.get("/app/search/")
-        self.assertContains(r, 'action="/admin/export-excel-api/"')
-        export = self.client.post("/admin/export-excel-api/", {"numbers": "9856325417", "last10": "1"})
-        self.assertEqual(export.status_code, 200)
-        self.assertIn("spreadsheetml", export["Content-Type"])
+        self.assertContains(r, 'action="/app/search/export/"')
+
+    def test_export_downloads_an_excel_report(self):
+        import openpyxl
+        r = self.client.post("/app/search/export/", {"numbers": "9856325417\n7000000001", "last10": "1"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("spreadsheetml", r["Content-Type"])
+        self.assertIn("attachment; filename=\"number_search_report_", r["Content-Disposition"])
+        wb = openpyxl.load_workbook(io.BytesIO(r.content))
+        self.assertEqual(wb.sheetnames, ["Summary", "By File", "Found", "Not Found"])
+
+    def test_full_report_for_an_uploaded_file(self):
+        import openpyxl
+        up = SimpleUploadedFile("nums.csv", b"9856325417\n7000000001\n")
+        r = self.client.post("/app/search/report/", {"file": up})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(list(openpyxl.load_workbook(io.BytesIO(r.content))["Found"].iter_rows(min_row=2))), 2)    # 2 files me hai
+        r = self.client.post("/app/search/report/", {"file": SimpleUploadedFile("x.txt", b"no digits")})
+        self.assertEqual((r.status_code, r.content.decode()), (400, "No numbers found in the file"))
+        r = self.client.post("/app/search/report/", {})
+        self.assertEqual(r.status_code, 400)
+
+    def test_downloads_need_a_signed_in_staff_user_and_post(self):
+        self.assertEqual(self.client.get("/app/search/export/").status_code, 405)
+        for user in (None, self.outsider):
+            self.client.logout()
+            if user:
+                self.client.force_login(user)
+            for url in ("/app/search/export/", "/app/search/report/"):
+                r = self.client.post(url, {"numbers": "9856325417"})
+                self.assertEqual(r.status_code, 302, url)
+                self.assertTrue(r["Location"].startswith("/app/login/"), url)
 
 
 # ------------------------------------------------------------------ license page
