@@ -1,8 +1,16 @@
 """License server ka logic: activate / check / deactivate / trial. HTTP se alag rakha hai taaki test aasaan ho."""
+import hashlib
+import hmac
 import re
+import secrets
 from datetime import timedelta
 
 from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
+from django.core.cache import cache
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.contrib.auth import password_validation
 from django.db import transaction
 from django.utils import timezone
 
@@ -34,9 +42,15 @@ def find_license(key):
     return lic
 
 
+PENDING_MESSAGE = ("Your account is created and waiting for approval. "
+                   "You will get access as soon as the seller activates your plan.")
+
+
 def _ensure_usable(lic, now):
     if lic.revoked:
         raise LicenseError("revoked", lic.revoked_reason or "This license has been disabled. Please contact support.")
+    if lic.license_type == protocol.PENDING:
+        raise LicenseError("pending", PENDING_MESSAGE)
     if lic.expires_at and now > lic.expires_at:
         what = "free trial has ended" if lic.license_type == "trial" else "license has expired"
         raise LicenseError("expired", f"Your {what} on {timezone.localtime(lic.expires_at):%d %b %Y}. Please renew to continue.")
@@ -145,6 +159,10 @@ def start_trial(machine_id, machine_name="", app_version="", ip=None, now=None):
     return _issue(lic, machine_id, now)
 
 
+def plan_days(plan):
+    return {"trial": settings.TRIAL_DAYS, "monthly": settings.MONTHLY_DAYS}.get(plan, settings.YEARLY_DAYS)
+
+
 def extend(lic, days, now=None):
     """Renewal: bacha hua time khoye bina days jodo."""
     now = now or timezone.now()
@@ -166,7 +184,7 @@ def create_license(*, customer_name, license_type="yearly", customer_email="", m
     if license_type == "lifetime":
         duration_days = None
     elif not duration_days:
-        duration_days = settings.TRIAL_DAYS if license_type == "trial" else settings.YEARLY_DAYS
+        duration_days = plan_days(license_type)
     key = protocol.generate_key()
     lic = License.objects.create(
         key_hash=protocol.hash_key(key), key_hint=protocol.key_hint(key), license_type=license_type,
@@ -192,3 +210,182 @@ def get_license(ref):
     if not ref or len(matches) != 1:
         raise LookupError(f"'{ref}' se {len(matches)} license mile. Poori id ya key ke aakhri 5 akshar do.")
     return matches[0]
+
+
+# ------------------------------------------------------------------ accounts (email + password), plan admin panel se
+LOGIN_FAIL_LIMIT = 6          # itni galat koshish ke baad 15 minute ruko
+LOGIN_FAIL_WINDOW = 15 * 60
+_DUMMY_HASH = make_password("not-a-real-password")
+
+
+def _clean_email(email):
+    email = (email or "").strip().lower()
+    try:
+        validate_email(email)
+    except ValidationError:
+        raise LicenseError("bad_email", "Please enter a valid email address.", 400)
+    return email[:254]
+
+
+def _account(email):
+    return License.objects.filter(password_hash__gt="", customer_email__iexact=email).first()
+
+
+def _secret_hash(secret):
+    return hashlib.sha256((secret or "").encode()).hexdigest()
+
+
+def _account_info(lic):
+    return {"email": lic.customer_email, "name": lic.customer_name, "plan": lic.license_type,
+            "expires": protocol.iso(lic.expires_at)}
+
+
+def _login_device(lic, machine_id, machine_name, app_version, ip, usage, now):
+    """Is PC ko account se jodo (machine limit ke andar) aur uska private secret do. Pending account ko bhi."""
+    activation = lic.activations.filter(machine_id=machine_id).first()
+    if activation is None or not activation.active:
+        used = lic.activations.filter(active=True).count()
+        if used >= lic.max_machines:
+            raise LicenseError(
+                "machine_limit",
+                f"This account is already signed in on {used} PC{'s' if used != 1 else ''} (limit {lic.max_machines}). "
+                "Sign out on the old PC first, or contact support.", 409)
+        if activation is None:
+            activation = Activation(license=lic, machine_id=machine_id)
+        activation.active = True
+    secret = secrets.token_urlsafe(32)
+    activation.secret_hash = _secret_hash(secret)
+    _touch(activation, machine_name, app_version, ip, usage, now)
+    return secret
+
+
+def _account_reply(lic, machine_id, secret, now):
+    if lic.revoked:
+        raise LicenseError("revoked", lic.revoked_reason or "This account has been disabled. Please contact support.")
+    if lic.license_type == protocol.PENDING:     # account hai, par plan abhi nahi mila: login ho gaya, access nahi
+        return {"ok": True, "pending": True, "message": PENDING_MESSAGE, "device_token": secret,
+                "account": _account_info(lic)}
+    _ensure_usable(lic, now)
+    reply = _issue(lic, machine_id, now)
+    reply.update(device_token=secret, account=_account_info(lic))
+    return reply
+
+
+@transaction.atomic
+def register(name, email, password, machine_id, machine_name="", app_version="", ip=None, usage=None, now=None):
+    now = now or timezone.now()
+    machine_id = _clean_machine(machine_id)
+    email = _clean_email(email)
+    name = (name or "").strip()[:200] or email
+    try:
+        password_validation.validate_password(password or "")
+    except ValidationError as exc:
+        raise LicenseError("weak_password", " ".join(exc.messages), 400)
+    if _account(email):
+        raise LicenseError("email_exists", "An account with this email already exists. Please sign in instead.", 409)
+    hidden_key = protocol.generate_key()      # account ki key koi nahi dekhta: bas table ke liye
+    lic = License.objects.create(
+        key_hash=protocol.hash_key(hidden_key), key_hint=protocol.key_hint(hidden_key), license_type=protocol.PENDING,
+        customer_name=name, customer_email=email, password_hash=make_password(password), max_machines=1,
+        offline_grace_days=settings.OFFLINE_GRACE_DAYS)
+    secret = _login_device(lic, machine_id, machine_name, app_version, ip, usage, now)
+    return _account_reply(lic, machine_id, secret, now)
+
+
+def _throttle_key(email):
+    return f"acct-fail:{hashlib.sha256(email.encode()).hexdigest()[:20]}"
+
+
+@transaction.atomic
+def login(email, password, machine_id, machine_name="", app_version="", ip=None, usage=None, now=None):
+    now = now or timezone.now()
+    machine_id = _clean_machine(machine_id)
+    email = _clean_email(email)
+    fails = cache.get(_throttle_key(email), 0)
+    if fails >= LOGIN_FAIL_LIMIT:
+        raise LicenseError("too_many_attempts", "Too many wrong passwords. Please wait 15 minutes and try again.", 429)
+    lic = _account(email)
+    good = check_password(password or "", lic.password_hash if lic else _DUMMY_HASH)   # time barabar rakhne ke liye
+    if not lic or not good:
+        cache.set(_throttle_key(email), fails + 1, LOGIN_FAIL_WINDOW)
+        raise LicenseError("bad_login", "Wrong email or password.", 401)
+    cache.delete(_throttle_key(email))
+    lic = License.objects.select_for_update().get(pk=lic.pk)
+    if lic.revoked:
+        raise LicenseError("revoked", lic.revoked_reason or "This account has been disabled. Please contact support.")
+    secret = _login_device(lic, machine_id, machine_name, app_version, ip, usage, now)
+    return _account_reply(lic, machine_id, secret, now)
+
+
+def account_check(email, device_token, machine_id, machine_name="", app_version="", ip=None, usage=None, now=None):
+    """Daily check: pending ho toh pending, plan mila ho toh naya signed token."""
+    now = now or timezone.now()
+    machine_id = _clean_machine(machine_id)
+    lic = _account(_clean_email(email))
+    activation = lic.activations.filter(machine_id=machine_id, active=True).first() if lic else None
+    if not activation or not activation.secret_hash or not hmac.compare_digest(activation.secret_hash, _secret_hash(device_token)):
+        raise LicenseError("not_activated", "This PC is not signed in. Please sign in again.", 409)
+    _touch(activation, machine_name, app_version, ip, usage, now)
+    return _account_reply(lic, machine_id, device_token, now)
+
+
+def account_logout(email, device_token, machine_id):
+    machine_id = _clean_machine(machine_id)
+    lic = _account(_clean_email(email))
+    activation = lic.activations.filter(machine_id=machine_id, active=True).first() if lic else None
+    if activation and activation.secret_hash and hmac.compare_digest(activation.secret_hash, _secret_hash(device_token)):
+        activation.active = False
+        activation.save(update_fields=["active"])
+        return {"ok": True, "deactivated": True}
+    return {"ok": True, "deactivated": False}
+
+
+def set_plan(lic, plan, now=None, days=None):
+    """Seller ka plan dena: monthly / yearly / lifetime (renew bhi: bacha hua time khoye bina din jodta hai)."""
+    now = now or timezone.now()
+    if plan not in ("pending", "trial") + tuple(p for p in protocol.TYPES):
+        raise ValueError(f"unknown plan {plan}")
+    if plan == "lifetime":
+        lic.expires_at, lic.duration_days = None, None
+    elif plan == protocol.PENDING:
+        lic.expires_at = None
+    else:
+        add = timedelta(days=days or plan_days(plan))
+        same_plan_running = lic.license_type == plan and lic.expires_at and lic.expires_at > now
+        lic.expires_at = (lic.expires_at if same_plan_running else now) + add
+        lic.duration_days = days or plan_days(plan)
+    lic.license_type = plan
+    lic.save()                      # block (revoked) ko ye nahi chhedta: block alag se hatana padta hai
+    return lic
+
+
+def set_password(lic, new_password=None):
+    """Customer password bhool jaye: seller naya temporary password deta hai. (password, ) wapas."""
+    new_password = new_password or secrets.token_urlsafe(9)
+    lic.password_hash = make_password(new_password)
+    lic.save(update_fields=["password_hash"])
+    cache.delete(_throttle_key((lic.customer_email or "").lower()))
+    return new_password
+
+
+# ------------------------------------------------------------------ app releases (update)
+def latest_release():
+    """Sabse naya published AppRelease, ya None."""
+    from .models import AppRelease
+
+    def order(release):
+        return tuple(int(p) if p.isdigit() else 0 for p in release.version.split("."))
+
+    releases = list(AppRelease.objects.filter(published=True))
+    return max(releases, key=order) if releases else None
+
+
+def release_manifest(release):
+    if release is None:
+        return {"none": True}
+    return {
+        "version": release.version, "released": release.created_at.date().isoformat(),
+        "download_url": release.download_url, "sha256": release.sha256.strip().lower(),
+        "notes": [line.strip() for line in release.notes.splitlines() if line.strip()],
+        "min_version": release.min_version.strip(),
+    }

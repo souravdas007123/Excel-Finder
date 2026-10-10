@@ -1,0 +1,10 @@
+{% load webui_tags %}
+<div class="modal-head"><h3>Clear the file index?</h3><button type="button" class="btn btn-ghost btn-sm" data-close-modal aria-label="Close">{% icon "x" 18 %}</button></div>
+<div class="modal-body">
+    <p>This removes <b>{{ files|comma }}</b> file{{ files|pluralize }} and all their numbers from the search index.</p>
+    <p class="hint" style="margin-top:10px">Your Excel files on disk are <b>not</b> touched. You will need to scan again before searching.</p>
+</div>
+<div class="modal-foot">
+    <button type="button" class="btn" data-close-modal>Cancel</button>
+    <button type="button" class="btn btn-danger" hx-post="{% url 'webui:scan_clear' %}" hx-swap="none">{% icon "trash" 15 %} <span class="spin"></span> Yes, clear the index</button>
+</div>

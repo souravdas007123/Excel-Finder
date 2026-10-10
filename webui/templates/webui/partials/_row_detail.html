@@ -1,0 +1,12 @@
+{% load webui_tags %}
+<div class="modal-head"><div><h3>Full row</h3><div class="hint">{% if file %}{{ file.file_name }} · {% endif %}Sheet {{ sheet|default:"—" }} · row {{ row }}</div></div>
+    <button type="button" class="btn btn-ghost btn-sm" data-close-modal aria-label="Close">{% icon "x" 18 %}</button></div>
+<div class="modal-body">
+{% if error %}<div class="alert bad">{% icon "alert" 18 %}<div class="grow">{{ error }}</div></div>
+{% else %}
+    <div class="table-wrap"><table class="cell-table"><tbody>
+    {% for c in cells %}<tr class="{% if c.hit %}hit-cell{% endif %}"><th scope="row">{{ c.header|default:c.col }}</th><td>{{ c.value }}</td></tr>{% empty %}<tr><td class="muted">This row is empty.</td></tr>{% endfor %}
+    </tbody></table></div>
+{% endif %}
+</div>
+<div class="modal-foot">{% if file %}<button type="button" class="btn" data-copy="{{ file.file_path }}">{% icon "copy" 14 %} Copy file path</button>{% endif %}<button type="button" class="btn btn-primary" data-close-modal>Close</button></div>

@@ -1,0 +1,61 @@
+{% extends "webui/base.html" %}
+{% load webui_tags %}
+{% block title %}Scan files | Excel Finder{% endblock %}
+{% block heading %}Scan files{% endblock %}
+{% block subheading %}<div class="sub">Step 1 · Teach Excel Finder what is in your files</div>{% endblock %}
+{% block actions %}<a class="btn btn-sm" href="{% url 'webui:search' %}" {% navattrs %}>Next: Bulk search {% icon "arrow" 15 %}</a>{% endblock %}
+{% block content %}
+<div class="stack">
+    <div id="scan-stats" class="card" hx-get="{% url 'webui:scan' %}" hx-trigger="indexChanged from:body" hx-select="#scan-stats" hx-target="this" hx-swap="outerHTML">
+        <div class="row" style="justify-content:space-between">
+            <div>
+                {% if files %}<b style="font-size:18px">{{ files|comma }}</b> files &middot; <b style="font-size:18px">{{ numbers|comma }}</b> numbers indexed
+                    <div class="hint">{% if last_scan %}Last scan {{ last_scan|timeago }} ({{ last_scan|date:"d M Y, H:i" }}){% endif %}</div>
+                {% else %}<b style="font-size:16px">No files indexed yet</b><div class="hint">Choose a drive below and start your first scan.</div>{% endif %}
+            </div>
+            {% if stale %}<span class="pill warn">{% icon "alert" 13 %} Older than {{ stale_days }} days</span>{% endif %}
+        </div>
+        {% if last and last.files_failed %}
+        <div class="alert warn" style="margin-top:14px">{% icon "alert" 18 %}
+            <div class="grow">{{ last.files_failed|comma }} file{{ last.files_failed|pluralize }} could not be read in the last scan.</div>
+            <button type="button" class="btn btn-sm" hx-get="{% url 'webui:history_detail' last.id %}" hx-target="#modal-body">See which files and why</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-head"><h2>{% icon "scan" 18 %} Choose what to scan</h2></div>
+        <form id="scan-form" hx-post="{% url 'webui:scan_start' %}" hx-target="#scan-live" hx-swap="innerHTML">
+            <div class="row" style="align-items:flex-end">
+                <div class="grow">
+                    <label class="field" for="location">Drive or folder</label>
+                    <select id="location" name="location" required>
+                        <option value="" selected disabled>Choose a drive or folder…</option>
+                        {% for key, label in locations %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+                        {% if allow_custom %}<option value="__custom__">Specific folder…</option>{% endif %}
+                    </select>
+                </div>
+                {% include "webui/partials/_scan_start_btn.html" with disabled=running %}
+            </div>
+            {% if allow_custom %}
+            <div id="custom-box" hidden style="margin-top:14px">
+                <label class="field" for="custom-path">Folder path</label>
+                <div class="row">
+                    <input class="grow" id="custom-path" name="custom_path" type="text" placeholder="D:\Data\Excel Files" autocomplete="off" style="flex:1">
+                    <button type="button" class="btn" hx-get="{% url 'webui:scan_browse' %}" hx-target="#modal-body">{% icon "folder" 16 %} Browse</button>
+                </div>
+            </div>
+            {% endif %}
+        </form>
+        <div id="scan-live" style="margin-top:18px"{% if running %} hx-get="{% url 'webui:scan_status' %}?task={{ running.id }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}></div>
+    </div>
+
+    {% if can_clear and files %}
+    <div class="card">
+        <div class="card-head"><h2>{% icon "trash" 18 %} Clear the index</h2></div>
+        <p class="hint" style="margin-bottom:12px">Removes everything Excel Finder learned (the search index). Your Excel files on disk are never touched. You can scan again any time.</p>
+        <button type="button" class="btn btn-danger" hx-get="{% url 'webui:scan_clear' %}" hx-target="#modal-body">{% icon "trash" 16 %} Clear file index…</button>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

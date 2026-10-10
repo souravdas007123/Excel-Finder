@@ -4,6 +4,8 @@ from django.db import models
 class LicenseState(models.Model):
     """Is PC par license ki halat (sirf ek row). Token server ne sign kiya hota hai, isliye badla nahi ja sakta."""
     license_key = models.CharField(max_length=40, blank=True)
+    account_email = models.CharField(max_length=254, blank=True)       # account se sign in hai toh uski email
+    device_token = models.CharField(max_length=64, blank=True)         # server ne is PC ko diya secret (password save nahi hota)
     token = models.TextField(blank=True)
     blocked_code = models.CharField(max_length=20, blank=True)        # server ne roka: revoked / expired / not_activated
     blocked_message = models.CharField(max_length=300, blank=True)

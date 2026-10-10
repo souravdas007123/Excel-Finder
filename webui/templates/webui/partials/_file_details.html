@@ -1,0 +1,17 @@
+{% load webui_tags %}
+{% if page_no == 1 %}<div class="hint" style="margin-bottom:6px">Where each number is inside <b>{{ file.file }}</b>:</div>{% endif %}
+{% for it in items %}
+<div class="loc">
+    <span class="num-chip">{{ it.number }}</span>
+    {% for l in it.locations %}
+    <button type="button" class="btn btn-sm" title="Open the whole row"
+            hx-get="{% url 'webui:search_row' %}?file_id={{ file.file_id }}&sheet={{ l.sheet|urlencode }}&row={{ l.row }}&col={{ l.col }}" hx-target="#modal-body">{{ l.sheet|default:"—" }} · row {{ l.row }}{% if l.column %} · col {{ l.column }}{% endif %}</button>
+    {% endfor %}
+</div>
+{% endfor %}
+{% if has_more %}
+<div class="more-row" hx-get="{% url 'webui:search_file' token file.file_id %}?page={{ next_page }}" hx-trigger="click, revealed" hx-swap="outerHTML" hx-target="this"><button type="button" class="btn btn-sm">Show more numbers</button></div>
+{% elif capped and page_no == 1 or capped and not has_more %}
+<div class="hint" style="margin-top:8px">This file has {{ file.numbers_count|comma }} matching numbers. The first {{ file.numbers|length }} are listed: export the Excel report for all of them.</div>
+{% endif %}
+{% if not items and page_no == 1 %}<div class="hint">No locations found.</div>{% endif %}

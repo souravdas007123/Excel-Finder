@@ -1,0 +1,6 @@
+{% extends "webui/base.html" %}
+{% load webui_tags %}
+{% block title %}Scan history | Excel Finder{% endblock %}
+{% block heading %}Scan history{% endblock %}
+{% block subheading %}<div class="sub">Every scan, and any files that could not be read</div>{% endblock %}
+{% block content %}{% include "webui/partials/_history_table.html" %}{% endblock %}

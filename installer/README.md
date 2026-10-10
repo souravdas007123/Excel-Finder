@@ -54,7 +54,10 @@ Sirf apne PC par test ke liye (local license server): `-ServerUrl http://127.0.0
 * App sirf `127.0.0.1` par sunta hai (network ke dusre computers se nahi khulta). Shuru karne par browser me khulta hai; chhota "Excel Finder is running" window band karne par app band ho jata hai.
 * Dobara chalane par agar pehle se chal raha ho toh naya server nahi banta, bas browser khul jata hai.
 
-## Update dena
+## Update dena (ek-click)
+`build_windows.ps1` ke ant me **SHA-256** dikhta hai. Setup.exe Google Drive par daalo, phir license server admin panel > **App releases > Add** me version + link + SHA-256 daalo. Customer ke app me "Update now" aata hai: app download karta hai, SHA-256 jaanchta hai, installer silent chalta hai aur app wapas khulta hai (data bacha rehta hai). Bina SHA-256 ke sirf Download link dikhta hai.
+
+## Update dena (haath se)
 Naya version banao (`search\version.py` badlo), wahi script chalao, wahi `AppId` wala installer customer ko do: wo purane ko update kar deta hai aur data nahi chhedta. (Auto-update abhi nahi hai.)
 
 ## Abhi nahi hai (jaante hue kami)

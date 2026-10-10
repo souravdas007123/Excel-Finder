@@ -43,6 +43,14 @@ server {
 ```
 **HTTPS zaruri hai** (license key network par jati hai). App http address ko maanti hi nahi (sirf 127.0.0.1 testing ke liye).
 
+## 3a. Customer accounts aur updates (admin panel)
+Admin panel (`/`) me teen hisse hain:
+* **Accounts (customers):** jo customer app me email + password se account banata hai wo yahan "Waiting for approval" dikhta hai. Plan do (Give MONTHLY / YEARLY / LIFETIME), block karo, password reset karo. Customer ka app plan milne ke 5 minute ke andar khud khul jata hai.
+* **App releases:** naya version (version, Setup.exe ka https link, SHA-256, notes). Customers ke app me "Update now" aata hai. API: `GET /api/v1/latest`.
+* **Licenses:** purane key (`EXFN-...`) wale licenses.
+
+Account ke liye API: `register`, `login`, `account_check`, `logout` (POST `/api/v1/<action>`). Password server par hashed rehta hai, galat password 6 baar ke baad 15 minute ke liye ruk jata hai. App password kabhi save nahi karta: login par server ek PC-specific secret deta hai.
+
 ## 3. Roz ke kaam
 Admin panel ya commands (dono chalte hain):
 

@@ -1,0 +1,12 @@
+{% load webui_tags %}
+{% if items %}
+<div class="table-wrap">
+    <table>
+        <thead><tr><th>File</th><th class="num">Numbers</th><th class="num">Matches</th><th class="hide-sm">Modified</th><th></th></tr></thead>
+        <tbody>{% include "webui/partials/_files_rows.html" %}</tbody>
+    </table>
+</div>
+<div class="hint" style="padding-top:10px">{{ total|comma }} file{{ total|pluralize }}{% if q %} match “{{ q }}”{% endif %}.</div>
+{% else %}
+<div class="empty">{% icon "files" 28 %}<b>{% if q %}No files match “{{ q }}”{% else %}No file contains your numbers{% endif %}</b>{% if not q %}Check the “Not found” tab, or scan again if files were added recently.{% endif %}</div>
+{% endif %}
