@@ -40,11 +40,6 @@ def toast(message, kind="info"):
     return render_to_string("webui/partials/_toast.html", {"message": message, "kind": kind})
 
 
-def with_toast(response, message, kind="info"):
-    response.content += toast(message, kind).encode()
-    return response
-
-
 def message_only(message, kind="info", status=200):
     """Sirf notification, page ka koi hissa nahi badalta (HX-Reswap: none)."""
     response = HttpResponse(toast(message, kind), status=status)
@@ -53,11 +48,6 @@ def message_only(message, kind="info", status=200):
 
 
 # ------------------------------------------------------------------ scan ETA / time
-def fmt_clock(seconds):
-    seconds = int(seconds or 0)
-    return f"{seconds // 60}:{seconds % 60:02d}"
-
-
 def fmt_eta(seconds):
     if seconds < 45:
         return "less than a minute"

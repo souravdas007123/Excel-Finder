@@ -304,7 +304,6 @@ class ScanTests(UiTestCase):
         self.assertEqual(bar["percent"], 100.0)                 # bar 100% se upar nahi
 
     def test_eta_and_clock_formats(self):
-        self.assertEqual(helpers.fmt_clock(125), "2:05")
         self.assertEqual(helpers.fmt_eta(10), "less than a minute")
         self.assertEqual(helpers.fmt_eta(600), "~10 min")
         self.assertEqual(helpers.fmt_eta(5400), "~1 h 30 min")

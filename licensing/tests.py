@@ -183,7 +183,7 @@ class BlockingTests(LicenseTestCase):
         now = protocol.utcnow()
         self.store_token(issued=now - timedelta(days=30), check_by=now - timedelta(days=16))
         status = service.current_status()
-        self.assertEqual((status.code, status.needs_online), ("offline_overdue", True))
+        self.assertEqual(status.code, "offline_overdue")
         self.server.unreachable = True
         result = service.check_now()
         self.assertFalse(result.ok)

@@ -147,7 +147,6 @@ class LicenseStatus:
     days_left: int = None
     check_by: datetime = None
     warn: str = ""             # ok hai par jaldi dhyan dena hai (expiry paas / online check baaki)
-    needs_online: bool = False  # internet se server check karne par theek ho sakta hai
 
     @property
     def type_label(self):
@@ -174,14 +173,13 @@ def evaluate(token, public_b64, machine_id, now=None, max_seen=None, blocked_cod
     """
     now = now or utcnow()
     if blocked_code:
-        return LicenseStatus(blocked_code, False, blocked_message or BLOCK_DEFAULTS.get(blocked_code, "License is blocked."),
-                             needs_online=blocked_code == "not_activated")
+        return LicenseStatus(blocked_code, False, blocked_message or BLOCK_DEFAULTS.get(blocked_code, "License is blocked."))
     if not token:
         return LicenseStatus("unlicensed", False, "No license activated yet. Enter your license key or start the free trial.")
     try:
         payload = verify_token(token, public_b64)
     except TokenError:
-        return LicenseStatus("invalid", False, "The saved license is not valid. Please activate again.", needs_online=True)
+        return LicenseStatus("invalid", False, "The saved license is not valid. Please activate again.")
 
     info = dict(license_type=payload.get("type", ""), customer=payload.get("customer", ""))
     expires, check_by, issued = parse_iso(payload.get("expires")), parse_iso(payload.get("check_by")), parse_iso(payload.get("issued"))
@@ -189,19 +187,16 @@ def evaluate(token, public_b64, machine_id, now=None, max_seen=None, blocked_cod
 
     if payload.get("machine") != machine_id:
         return LicenseStatus("wrong_machine", False,
-                             "This license is activated on a different PC. Deactivate it there, or activate again here.",
-                             needs_online=True, **info)
+                             "This license is activated on a different PC. Deactivate it there, or activate again here.", **info)
     if expires and now > expires:
         return LicenseStatus("expired", False, f"Your license expired on {_fmt_date(expires)}. Please renew to continue.",
                              days_left=0, **info)
     if (issued and now < issued - CLOCK_SLACK) or (max_seen and now < max_seen - CLOCK_SLACK):
         return LicenseStatus("clock", False,
-                             "The computer's date looks wrong. Fix the date and connect to the internet to verify the license.",
-                             needs_online=True, **info)
+                             "The computer's date looks wrong. Fix the date and connect to the internet to verify the license.", **info)
     if check_by and now > check_by:
         return LicenseStatus("offline_overdue", False,
-                             "The license could not be verified for a long time. Please connect to the internet and press 'Check now'.",
-                             needs_online=True, **info)
+                             "The license could not be verified for a long time. Please connect to the internet and press 'Check now'.", **info)
 
     days_left = None
     warn = ""

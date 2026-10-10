@@ -286,7 +286,7 @@ def _updates_dir():
     return folder
 
 
-def _download(url, target, expected_sha, progress):
+def _download(url, target, progress):
     """File utarkar uska SHA-256 return karo. Bahut bada / Google ka web page ho toh ValueError."""
     request = urllib.request.Request(direct_download_url(url), headers={"User-Agent": f"ExcelFinder/{VERSION}"})
     digest, done = hashlib.sha256(), 0
@@ -334,7 +334,7 @@ def _install_worker(latest):
             percent = int(done * 100 / total) if total else 0
             _set("downloading", f"Downloading... {percent}%" if total else f"Downloading... {done // (1024 * 1024)} MB", percent)
 
-        actual = _download(latest["download_url"], target, latest["sha256"], progress)
+        actual = _download(latest["download_url"], target, progress)
         if actual != latest["sha256"]:
             target.unlink(missing_ok=True)
             raise ValueError("The downloaded file does not match the expected checksum, so it was NOT installed. "

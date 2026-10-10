@@ -50,10 +50,6 @@ def _expired(request):
     return render(request, "webui/partials/_search_expired.html")
 
 
-def _flag(request, name):
-    return request.GET.get(name) == "1" or request.POST.get(name) == "1"
-
-
 @staff_required
 @require_GET
 def search_page(request):
