@@ -8,26 +8,33 @@ Is repo me teen hisse hain:
 | **License server** (`license_server/`) | **Aap**, apne server par | Keys banana, activate, renew, block |
 | **Installer** (`installer/`) | Aap, apne PC par, ek baar har version par | `ExcelFinder-Setup-x.y.z.exe` banata hai |
 
-## Poora flow (simple: account + admin panel)
+## Poora flow (simple: naam + email, key mail se)
 ```
-Aap Setup.exe Google Drive par daalo ──> Customer download karke install kare
-Customer app kholta hai ──> naam + email + password se ACCOUNT banata hai   (internet chahiye)
-Aap license server ke admin panel > "Accounts (customers)" me naya user dekhte ho ("Waiting for approval")
-Aap plan dete ho: Monthly / Yearly / Lifetime  (ek click)  ──> customer ka app 5 minute me khul jata hai
-Baad me: "Block" se rok sakte ho, plan badal / renew kar sakte ho
+Aap Setup.exe Google Drive par daalo ──> Customer link se download + install kare
+Customer app kholta hai ──> naam, email aur APP KA PASSWORD deta hai   (internet chahiye)
+   naam + email aapke license server par jata hai, password sirf customer ke PC par rehta hai
+Customer aapko email karta hai ──> "license key chahiye"
+Aap admin panel > Licenses me us customer ko "Waiting for key" dekhte ho ──> "Generate key: Monthly / Yearly / Lifetime"
+Key ek baar dikhti hai ──> use customer ke email par bhej do
+Customer key daalta hai ──> app chalu (1 PC par). Din pehli baar key daalne se ginte hain
 ```
-Key (`EXFN-...`) wala purana tareeka bhi chalta hai (admin panel > Licenses), par ab zaruri nahi.
 
-### Roz ke kaam (license server admin panel)
-| Kaam | Kahan |
+### Roz ke kaam (license server admin panel > Licenses)
+| Kaam | Kaise |
 |---|---|
-| Naya customer dikhna | **Accounts (customers)**: "Waiting for approval" |
-| Monthly / Yearly / Lifetime dena ya renew | Checkbox tick, Action: **Give MONTHLY / YEARLY / LIFETIME access**, Run. Ya list me "License type" dropdown badlo aur Save |
-| Customer ka access rokna | Action: **Block selected accounts** (wapas: Unblock) |
-| Password bhool gaya | Action: **Set a new temporary password** (naya password ek baar dikhta hai, customer ko bhej do) |
-| Dusre PC par chalana | Account kholo, "PCs" me purane PC ka `active` untick; ya "Max machines" badhao |
+| Naya customer dikhna | List me "Waiting for key" (naam + email ke saath) |
+| Key banana | Customer par tick, Action: **Generate key: MONTHLY / YEARLY / LIFETIME**, Run. Key upar ek baar dikhti hai, email kar do |
+| Kaun kitna use kar raha hai | List me: plan, status, expiry, PCs (1/1), **files indexed**, searches, last seen |
+| Renew | Action: **Renew: add 30 days** ya **add 365 days** |
+| Customer ko rokna | Action: **CANCEL (block)**. App agle check par band (wapas: Un-cancel) |
+| Customer naya PC use karna chahe | Action: **Free the PC**, phir wo wahi key naye PC par daalta hai |
+| Customer password bhool gaya | Action: **Password reset code**. 8 akshar ka code ek baar dikhta hai (24 ghante, ek hi baar chalta hai), email kar do |
+| Key kho gayi | Wahi Generate key action dobara: nayi key banti hai, purani band |
 
-Monthly = 30 din, Yearly = 365 din, Lifetime = kabhi nahi. Renew karne par bacha hua time nahi jata.
+Monthly = 30 din, Yearly = 365 din, Lifetime = kabhi nahi. **Ek key = ek PC.**
+
+### Password reset (customer ke liye)
+Customer ka app password sirf uske PC par hai, aap use dekh nahi sakte. Bhool jaye to: login page par **"Reset it with a code from the seller"** > aap code dete ho > customer email + code + naya password daalta hai. Code server par jaanchta hai, isliye internet chahiye, aur ek hi baar chalta hai. (Galat code 6 baar daalne par 15 minute ruk jata hai.)
 
 ### Naya version dena (git push ke baad)
 `git push` apne aap customers tak nahi pahunchta: app ek installed program hai. Tareeka:
@@ -52,11 +59,11 @@ SHA-256 khali chhodoge toh sirf "Download" link dikhega (ek-click update nahi).
 ## License ke prakar
 | Prakar | Kaise chalta hai | Kab use karein |
 |---|---|---|
-| **Yearly** | Pehli activation se 365 din. Khatam hote hi app band, 14 din pehle chetavni. Renew = admin me "Renew" (bacha hua time nahi jata). | Aapka main plan |
+| **Monthly** | Pehli activation se 30 din. Khatam hote hi app band, 14 din pehle chetavni. Renew = admin me "Renew: add 30 days" (bacha hua time nahi jata). | Chhota / try karne wala plan |
+| **Yearly** | Pehli activation se 365 din, baaki wahi. | Aapka main plan |
 | **Lifetime** | Kabhi expire nahi. Phir bhi PC par bindha rehta hai. | Upar ka mehnga option |
-| **Free trial** | App ke andar "Start free trial" (key nahi chahiye), 14 din, har PC ko sirf ek baar. | Customer pehle try kare |
 
-Har license **ek PC** par bindhi hai (team ke liye "max machines" badhao). PC badalna ho toh customer "Deactivate this PC" dabaye, ya aap admin me us PC ka `active` untick karo.
+Har license **ek PC** par bindhi hai (team ke liye "max machines" badhao). PC badalna ho toh customer "Deactivate this PC" dabaye, ya aap admin me **Free the PC** action chalao.
 
 **Internet kab chahiye:** activate karte waqt, aur roz ek baar check ke liye. Internet na ho toh app **14 din** (har license ki apni setting) tak bina check ke chalta hai, uske baad "connect to the internet" bolkar ruk jata hai.
 

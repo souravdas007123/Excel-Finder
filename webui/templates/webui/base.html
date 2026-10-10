@@ -36,10 +36,7 @@
                 <span><b>{{ license_chip.text }}</b><span>{{ license_chip.sub }}</span></span>
             </a>
             {% endif %}
-            <div class="side-meta">
-                <span>v{{ app_version }}</span>
-                {% if can_use_admin %}<a href="/admin/" hx-boost="false" title="Open the classic admin panel">Admin panel {% icon "external" 13 %}</a>{% endif %}
-            </div>
+            <div class="side-meta"><span>v{{ app_version }}</span></div>
             <div class="side-meta">
                 <span>{% icon "user" 14 %} {{ request.user.get_username|truncatechars:22 }}</span>
                 <form method="post" action="{% url 'webui:logout' %}" hx-boost="false">{% csrf_token %}
@@ -63,6 +60,10 @@
             </button>
         </header>
         <div class="content">
+            {% if license_warn and active != 'license' %}
+            <div class="banner"><div class="alert warn" role="status">{% icon "alert" 18 %}<div class="grow">{{ license_warn }}</div>
+                <a class="btn btn-sm" href="{% url 'webui:license' %}" {% navattrs %}>License</a></div></div>
+            {% endif %}
             {% include "webui/partials/_update_banner.html" %}
             {% block content %}{% endblock %}
         </div>

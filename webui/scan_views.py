@@ -3,7 +3,7 @@ from django.http import HttpResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from fileindex import views as core
+from fileindex import services as core
 from fileindex.drives import get_scan_locations
 from fileindex.models import FileIndex, ScanTask
 from fileindex.scanner import cancel_event, scan_lock

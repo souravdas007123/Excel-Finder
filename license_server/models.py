@@ -7,8 +7,7 @@ from django.utils import timezone
 
 
 class License(models.Model):
-    TYPE_CHOICES = [("pending", "Pending (no access yet)"), ("monthly", "Monthly"), ("yearly", "Yearly"),
-                    ("lifetime", "Lifetime"), ("trial", "Free trial")]
+    TYPE_CHOICES = [("pending", "Waiting for key"), ("monthly", "Monthly"), ("yearly", "Yearly"), ("lifetime", "Lifetime")]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key_hash = models.CharField(max_length=64, unique=True, editable=False)   # key ka hash (asli key save nahi hoti)
@@ -16,8 +15,9 @@ class License(models.Model):
     license_type = models.CharField(max_length=10, choices=TYPE_CHOICES, default="yearly")
     customer_name = models.CharField(max_length=200)
     customer_email = models.EmailField(blank=True)
-    password_hash = models.CharField(max_length=128, blank=True, editable=False,
-                                     help_text="Sirf account (email + password) wale customers ke liye")
+    reset_code_hash = models.CharField(max_length=64, blank=True, editable=False,
+                                       help_text="Password reset code ka hash (ek baar chalta hai)")
+    reset_expires = models.DateTimeField(null=True, blank=True, editable=False)
     notes = models.TextField(blank=True)
     max_machines = models.PositiveSmallIntegerField(default=1, help_text="Kitne PC par chal sakta hai")
     duration_days = models.PositiveIntegerField(
@@ -46,7 +46,7 @@ class License(models.Model):
             return "pending"
         if self.expires_at and now > self.expires_at:
             return "expired"
-        if self.first_activated_at is None and not self.password_hash:
+        if self.first_activated_at is None:
             return "unused"
         return "active"
 
@@ -60,11 +60,10 @@ class Activation(models.Model):
     first_seen = models.DateTimeField(auto_now_add=True)
     last_seen = models.DateTimeField(default=timezone.now)
     last_ip = models.GenericIPAddressField(null=True, blank=True)
-    secret_hash = models.CharField(max_length=64, blank=True, editable=False,
-                                   help_text="Account login par is PC ko mila secret (hash)")
     active = models.BooleanField(default=True, help_text="Band karne par ye PC license se hat jata hai (seat khali)")
     searches_total = models.PositiveIntegerField(default=0)
     scans_total = models.PositiveIntegerField(default=0)
+    files_indexed = models.PositiveIntegerField(default=0, help_text="Is PC ke index me abhi kitni Excel files hain")
 
     class Meta:
         unique_together = [("license", "machine_id")]
@@ -72,14 +71,6 @@ class Activation(models.Model):
 
     def __str__(self):
         return f"{self.machine_name or self.machine_id[:8]} - {self.license}"
-
-
-class Account(License):
-    """Admin me 'Accounts' list: wahi License table, sirf email + password wale customers."""
-    class Meta:
-        proxy = True
-        verbose_name = "Account"
-        verbose_name_plural = "Accounts (customers)"
 
 
 class AppRelease(models.Model):

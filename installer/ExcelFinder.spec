@@ -11,11 +11,9 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 sys.path.insert(0, ROOT)      # collect_submodules apne packages (search, fileindex, licensing) import kar sake
 CONSOLE = os.environ.get("EXCEL_FINDER_CONSOLE") == "1"     # debugging: console window ke saath build
 
-datas = collect_data_files("django")                           # admin templates / static / locale
+datas = collect_data_files("django")                           # django ki templates / locale
 datas += [
     (os.path.join(ROOT, "templates"), "templates"),
-    (os.path.join(ROOT, "fileindex", "templates"), os.path.join("fileindex", "templates")),
-    (os.path.join(ROOT, "licensing", "templates"), os.path.join("licensing", "templates")),
     (os.path.join(ROOT, "webui", "templates"), os.path.join("webui", "templates")),       # naya UI (htmx)
     (os.path.join(ROOT, "staticfiles"), "staticfiles"),        # python manage.py collectstatic ka output
 ]
@@ -27,7 +25,7 @@ hiddenimports = (
     + collect_submodules("licensing")
     + collect_submodules("webui")           # views, urls, context, templatetags (naam se import hote hain)
     + collect_submodules("search")
-    + collect_submodules("django.contrib")
+    + [m for pkg in ("auth", "contenttypes", "sessions", "staticfiles") for m in collect_submodules(f"django.contrib.{pkg}")]
     + ["search", "search.settings", "search.urls", "search.wsgi", "search.middleware", "search.setup_views",
        "search.version", "licensing.middleware", "licensing.build_config", "webui.context", "webui.urls",
        "python_calamine", "waitress", "whitenoise", "whitenoise.middleware", "openpyxl", "cryptography",
@@ -40,7 +38,7 @@ a = Analysis(
     pathex=[ROOT],
     datas=datas,
     hiddenimports=hiddenimports,
-    excludes=["license_server", "pytest", "IPython"],          # seller wala server customer ke paas nahi jata
+    excludes=["license_server", "pytest", "IPython", "django.contrib.admin"],   # seller wala server aur admin customer ke paas nahi jate
     noarchive=False,
 )
 pyz = PYZ(a.pure)

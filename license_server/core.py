@@ -1,4 +1,5 @@
-"""License server ka logic: activate / check / deactivate / trial. HTTP se alag rakha hai taaki test aasaan ho."""
+"""License server ka logic: request (naam + email), key banana, activate / check / deactivate, password reset code.
+HTTP se alag rakha hai taaki test aasaan ho."""
 import hashlib
 import hmac
 import re
@@ -6,11 +7,9 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
-from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
-from django.contrib.auth import password_validation
 from django.db import transaction
 from django.utils import timezone
 
@@ -42,8 +41,7 @@ def find_license(key):
     return lic
 
 
-PENDING_MESSAGE = ("Your account is created and waiting for approval. "
-                   "You will get access as soon as the seller activates your plan.")
+PENDING_MESSAGE = "Your license is not ready yet. Please wait for the license key from the seller."
 
 
 def _ensure_usable(lic, now):
@@ -52,8 +50,7 @@ def _ensure_usable(lic, now):
     if lic.license_type == protocol.PENDING:
         raise LicenseError("pending", PENDING_MESSAGE)
     if lic.expires_at and now > lic.expires_at:
-        what = "free trial has ended" if lic.license_type == "trial" else "license has expired"
-        raise LicenseError("expired", f"Your {what} on {timezone.localtime(lic.expires_at):%d %b %Y}. Please renew to continue.")
+        raise LicenseError("expired", f"Your license expired on {timezone.localtime(lic.expires_at):%d %b %Y}. Please renew to continue.")
 
 
 def _issue(lic, machine_id, now):
@@ -87,6 +84,10 @@ def _touch(activation, machine_name, app_version, ip, usage, now):
         except (TypeError, ValueError):
             value = 0
         setattr(activation, field, max(getattr(activation, field), min(value, 2_000_000_000)))
+    try:                                                # files_indexed = abhi ki ginti (ghat bhi sakti hai, jaise index saaf karne par)
+        activation.files_indexed = min(max(0, int(usage.get("files_indexed", activation.files_indexed))), 2_000_000_000)
+    except (TypeError, ValueError):
+        pass
     activation.save()
 
 
@@ -137,30 +138,8 @@ def deactivate(key, machine_id, now=None):
     return {"ok": True, "deactivated": bool(updated)}
 
 
-@transaction.atomic
-def start_trial(machine_id, machine_name="", app_version="", ip=None, now=None):
-    """Har PC ko sirf ek free trial. Dobara maange toh wahi purana trial (jo khatam ho chuka ho sakta hai)."""
-    now = now or timezone.now()
-    machine_id = _clean_machine(machine_id)
-    previous = Activation.objects.filter(machine_id=machine_id, license__license_type="trial").select_related("license").first()
-    if previous:
-        _ensure_usable(previous.license, now)
-        _touch(previous, machine_name, app_version, ip, None, now)
-        return _issue(previous.license, machine_id, now)
-
-    key = protocol.generate_key()     # trial ki key customer ko nahi dikhti, bas record ke liye
-    lic = License.objects.create(
-        key_hash=protocol.hash_key(key), key_hint=protocol.key_hint(key), license_type="trial",
-        customer_name="Free trial", max_machines=1, duration_days=settings.TRIAL_DAYS,
-        offline_grace_days=settings.OFFLINE_GRACE_DAYS, first_activated_at=now,
-        expires_at=now + timedelta(days=settings.TRIAL_DAYS))
-    activation = Activation(license=lic, machine_id=machine_id)
-    _touch(activation, machine_name, app_version, ip, None, now)
-    return _issue(lic, machine_id, now)
-
-
 def plan_days(plan):
-    return {"trial": settings.TRIAL_DAYS, "monthly": settings.MONTHLY_DAYS}.get(plan, settings.YEARLY_DAYS)
+    return settings.MONTHLY_DAYS if plan == "monthly" else settings.YEARLY_DAYS
 
 
 def extend(lic, days, now=None):
@@ -212,10 +191,11 @@ def get_license(ref):
     return matches[0]
 
 
-# ------------------------------------------------------------------ accounts (email + password), plan admin panel se
-LOGIN_FAIL_LIMIT = 6          # itni galat koshish ke baad 15 minute ruko
-LOGIN_FAIL_WINDOW = 15 * 60
-_DUMMY_HASH = make_password("not-a-real-password")
+# ------------------------------------------------------------------ customer ki request, key banana, password reset
+RESET_VALID_HOURS = 24
+RESET_FAIL_LIMIT = 6          # itni galat koshish ke baad 15 minute ruko
+RESET_FAIL_WINDOW = 15 * 60
+_RESET_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 def _clean_email(email):
@@ -227,145 +207,74 @@ def _clean_email(email):
     return email[:254]
 
 
-def _account(email):
-    return License.objects.filter(password_hash__gt="", customer_email__iexact=email).first()
-
-
-def _secret_hash(secret):
-    return hashlib.sha256((secret or "").encode()).hexdigest()
-
-
-def _account_info(lic):
-    return {"email": lic.customer_email, "name": lic.customer_name, "plan": lic.license_type,
-            "expires": protocol.iso(lic.expires_at)}
-
-
-def _login_device(lic, machine_id, machine_name, app_version, ip, usage, now):
-    """Is PC ko account se jodo (machine limit ke andar) aur uska private secret do. Pending account ko bhi."""
-    activation = lic.activations.filter(machine_id=machine_id).first()
-    if activation is None or not activation.active:
-        used = lic.activations.filter(active=True).count()
-        if used >= lic.max_machines:
-            raise LicenseError(
-                "machine_limit",
-                f"This account is already signed in on {used} PC{'s' if used != 1 else ''} (limit {lic.max_machines}). "
-                "Sign out on the old PC first, or contact support.", 409)
-        if activation is None:
-            activation = Activation(license=lic, machine_id=machine_id)
-        activation.active = True
-    secret = secrets.token_urlsafe(32)
-    activation.secret_hash = _secret_hash(secret)
-    _touch(activation, machine_name, app_version, ip, usage, now)
-    return secret
-
-
-def _account_reply(lic, machine_id, secret, now):
-    if lic.revoked:
-        raise LicenseError("revoked", lic.revoked_reason or "This account has been disabled. Please contact support.")
-    if lic.license_type == protocol.PENDING:     # account hai, par plan abhi nahi mila: login ho gaya, access nahi
-        return {"ok": True, "pending": True, "message": PENDING_MESSAGE, "device_token": secret,
-                "account": _account_info(lic)}
-    _ensure_usable(lic, now)
-    reply = _issue(lic, machine_id, now)
-    reply.update(device_token=secret, account=_account_info(lic))
-    return reply
+def _by_email(email):
+    return License.objects.filter(customer_email__iexact=email).order_by("-created_at").first()
 
 
 @transaction.atomic
-def register(name, email, password, machine_id, machine_name="", app_version="", ip=None, usage=None, now=None):
-    now = now or timezone.now()
-    machine_id = _clean_machine(machine_id)
+def request_license(name, email):
+    """Customer ne app me naam + email diya: seller ke admin panel me 'Waiting for key' ki row. Dobara bhejne par wahi row."""
     email = _clean_email(email)
-    name = (name or "").strip()[:200] or email
-    try:
-        password_validation.validate_password(password or "")
-    except ValidationError as exc:
-        raise LicenseError("weak_password", " ".join(exc.messages), 400)
-    if _account(email):
-        raise LicenseError("email_exists", "An account with this email already exists. Please sign in instead.", 409)
-    hidden_key = protocol.generate_key()      # account ki key koi nahi dekhta: bas table ke liye
-    lic = License.objects.create(
-        key_hash=protocol.hash_key(hidden_key), key_hint=protocol.key_hint(hidden_key), license_type=protocol.PENDING,
-        customer_name=name, customer_email=email, password_hash=make_password(password), max_machines=1,
-        offline_grace_days=settings.OFFLINE_GRACE_DAYS)
-    secret = _login_device(lic, machine_id, machine_name, app_version, ip, usage, now)
-    return _account_reply(lic, machine_id, secret, now)
+    name = (name or "").strip()[:200]
+    if not name:
+        raise LicenseError("bad_name", "Please enter your name.", 400)
+    if _by_email(email) is None:
+        hidden_key = protocol.generate_key()      # asli key seller baad me banata hai; ye kisi ko dikhti nahi
+        License.objects.create(
+            key_hash=protocol.hash_key(hidden_key), key_hint=protocol.key_hint(hidden_key), license_type=protocol.PENDING,
+            customer_name=name, customer_email=email, max_machines=1, offline_grace_days=settings.OFFLINE_GRACE_DAYS)
+    return {"ok": True, "message": "Request received. The seller will email you a license key."}
 
 
-def _throttle_key(email):
-    return f"acct-fail:{hashlib.sha256(email.encode()).hexdigest()[:20]}"
-
-
-@transaction.atomic
-def login(email, password, machine_id, machine_name="", app_version="", ip=None, usage=None, now=None):
-    now = now or timezone.now()
-    machine_id = _clean_machine(machine_id)
-    email = _clean_email(email)
-    fails = cache.get(_throttle_key(email), 0)
-    if fails >= LOGIN_FAIL_LIMIT:
-        raise LicenseError("too_many_attempts", "Too many wrong passwords. Please wait 15 minutes and try again.", 429)
-    lic = _account(email)
-    good = check_password(password or "", lic.password_hash if lic else _DUMMY_HASH)   # time barabar rakhne ke liye
-    if not lic or not good:
-        cache.set(_throttle_key(email), fails + 1, LOGIN_FAIL_WINDOW)
-        raise LicenseError("bad_login", "Wrong email or password.", 401)
-    cache.delete(_throttle_key(email))
-    lic = License.objects.select_for_update().get(pk=lic.pk)
-    if lic.revoked:
-        raise LicenseError("revoked", lic.revoked_reason or "This account has been disabled. Please contact support.")
-    secret = _login_device(lic, machine_id, machine_name, app_version, ip, usage, now)
-    return _account_reply(lic, machine_id, secret, now)
-
-
-def account_check(email, device_token, machine_id, machine_name="", app_version="", ip=None, usage=None, now=None):
-    """Daily check: pending ho toh pending, plan mila ho toh naya signed token."""
-    now = now or timezone.now()
-    machine_id = _clean_machine(machine_id)
-    lic = _account(_clean_email(email))
-    activation = lic.activations.filter(machine_id=machine_id, active=True).first() if lic else None
-    if not activation or not activation.secret_hash or not hmac.compare_digest(activation.secret_hash, _secret_hash(device_token)):
-        raise LicenseError("not_activated", "This PC is not signed in. Please sign in again.", 409)
-    _touch(activation, machine_name, app_version, ip, usage, now)
-    return _account_reply(lic, machine_id, device_token, now)
-
-
-def account_logout(email, device_token, machine_id):
-    machine_id = _clean_machine(machine_id)
-    lic = _account(_clean_email(email))
-    activation = lic.activations.filter(machine_id=machine_id, active=True).first() if lic else None
-    if activation and activation.secret_hash and hmac.compare_digest(activation.secret_hash, _secret_hash(device_token)):
-        activation.active = False
-        activation.save(update_fields=["active"])
-        return {"ok": True, "deactivated": True}
-    return {"ok": True, "deactivated": False}
-
-
-def set_plan(lic, plan, now=None, days=None):
-    """Seller ka plan dena: monthly / yearly / lifetime (renew bhi: bacha hua time khoye bina din jodta hai)."""
-    now = now or timezone.now()
-    if plan not in ("pending", "trial") + tuple(p for p in protocol.TYPES):
-        raise ValueError(f"unknown plan {plan}")
-    if plan == "lifetime":
-        lic.expires_at, lic.duration_days = None, None
-    elif plan == protocol.PENDING:
-        lic.expires_at = None
-    else:
-        add = timedelta(days=days or plan_days(plan))
-        same_plan_running = lic.license_type == plan and lic.expires_at and lic.expires_at > now
-        lic.expires_at = (lic.expires_at if same_plan_running else now) + add
-        lic.duration_days = days or plan_days(plan)
+def issue_key(lic, plan):
+    """Seller 'Generate key' dabata hai: plan lagao aur nayi key banao. Din pehli activation se ginte hain. Key sirf abhi dikhti hai."""
+    if plan not in protocol.TYPES:
+        raise ValueError(f"plan must be one of {protocol.TYPES}")
     lic.license_type = plan
-    lic.save()                      # block (revoked) ko ye nahi chhedta: block alag se hatana padta hai
-    return lic
+    lic.duration_days = None if plan == "lifetime" else plan_days(plan)
+    lic.expires_at = None
+    lic.first_activated_at = None
+    lic.save()
+    return rotate_key(lic)
 
 
-def set_password(lic, new_password=None):
-    """Customer password bhool jaye: seller naya temporary password deta hai. (password, ) wapas."""
-    new_password = new_password or secrets.token_urlsafe(9)
-    lic.password_hash = make_password(new_password)
-    lic.save(update_fields=["password_hash"])
-    cache.delete(_throttle_key((lic.customer_email or "").lower()))
-    return new_password
+def release_pcs(lic):
+    """Is license ke saare PC hata do (customer naye PC par activate kar sake)."""
+    return lic.activations.filter(active=True).update(active=False)
+
+
+def make_reset_code(lic, now=None):
+    """Customer password bhool gaya: seller ek baar chalne wala code banata hai (24 ghante). Code sirf abhi dikhta hai."""
+    now = now or timezone.now()
+    raw = "".join(secrets.choice(_RESET_ALPHABET) for _ in range(8))
+    lic.reset_code_hash = hashlib.sha256(raw.encode()).hexdigest()
+    lic.reset_expires = now + timedelta(hours=RESET_VALID_HOURS)
+    lic.save(update_fields=["reset_code_hash", "reset_expires"])
+    return f"{raw[:4]}-{raw[4:]}"
+
+
+def _reset_throttle_key(email):
+    return f"reset-fail:{hashlib.sha256(email.encode()).hexdigest()[:20]}"
+
+
+def verify_reset(email, code, now=None):
+    """App ne email + reset code bheja: sahi ho toh code kharch ho jata hai (dobara nahi chalega) aur app naya password rakh sakta hai."""
+    now = now or timezone.now()
+    email = _clean_email(email)
+    fails = cache.get(_reset_throttle_key(email), 0)
+    if fails >= RESET_FAIL_LIMIT:
+        raise LicenseError("too_many_attempts", "Too many wrong codes. Please wait 15 minutes and try again.", 429)
+    raw = re.sub(r"[^A-Za-z0-9]", "", code or "").upper()
+    lic = _by_email(email)
+    good = bool(lic and raw and lic.reset_code_hash and lic.reset_expires and now <= lic.reset_expires
+                and hmac.compare_digest(lic.reset_code_hash, hashlib.sha256(raw.encode()).hexdigest()))
+    if not good:
+        cache.set(_reset_throttle_key(email), fails + 1, RESET_FAIL_WINDOW)
+        raise LicenseError("bad_code", "That reset code is not valid or has expired. Ask the seller for a new one.", 403)
+    cache.delete(_reset_throttle_key(email))
+    lic.reset_code_hash, lic.reset_expires = "", None
+    lic.save(update_fields=["reset_code_hash", "reset_expires"])
+    return {"ok": True, "message": "Reset code accepted."}
 
 
 # ------------------------------------------------------------------ app releases (update)
