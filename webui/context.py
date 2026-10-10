@@ -1,3 +1,5 @@
+from django.conf import settings
+
 from licensing import service
 from search.version import VERSION
 
@@ -18,5 +20,5 @@ def shell(request):
         chip = {"tone": "warn", "text": "Waiting for approval", "sub": "Seller will activate your plan"}
     else:
         chip = {"tone": "bad", "text": "License problem", "sub": status.message[:60]}
-    return {"app_version": VERSION, "license_chip": chip, "can_use_admin": user.is_staff,
-            "license_warn": status.warn if service.enforced() and status.ok else ""}
+    return {"app_version": VERSION, "license_chip": chip, "license_ok": status.ok or not service.enforced(),
+            "can_use_admin": user.is_staff}

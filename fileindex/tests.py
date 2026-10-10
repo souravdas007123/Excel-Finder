@@ -1,4 +1,4 @@
-"""Automated tests: scan, search, upload, export, scan control, migration, settings.
+"""Automated tests: scan, search, upload, export, permissions, admin pages, migration, settings.
 
 Chalane ke liye:   python manage.py test
 Koi Excel file ya database chhoona nahi padta: har test apni temporary files aur test database banata hai.
@@ -19,8 +19,10 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import SimpleTestCase, TestCase
+from django.urls import reverse
+from django.utils import timezone
 
-from . import scanner, services
+from . import scanner, views
 from .excel_parser import extract_numbers, match_key, parse_file
 from .models import FileIndex, NumberIndex, ScanFailure, ScanTask
 from .scanner import _friendly_reason, run_scan, scan_lock
@@ -158,27 +160,27 @@ class ParseFileTests(TempDirMixin, SimpleTestCase):
 
 class ParseInputNumbersTests(SimpleTestCase):
     def test_splits_on_comma_semicolon_and_newline(self):
-        nums, skipped, dups = services._parse_numbers("9856325417, 8569741235;9000000001\n9000000002")
+        nums, skipped, dups = views._parse_numbers("9856325417, 8569741235;9000000001\n9000000002")
         self.assertEqual(nums, ["9856325417", "8569741235", "9000000001", "9000000002"])
         self.assertEqual((skipped, dups), ([], 0))
 
     def test_short_entries_are_skipped_and_reported(self):
-        nums, skipped, _ = services._parse_numbers("9856325417\n123\nabc")
+        nums, skipped, _ = views._parse_numbers("9856325417\n123\nabc")
         self.assertEqual(nums, ["9856325417"])
         self.assertEqual(skipped, ["123", "abc"])
 
     def test_exact_mode_keeps_country_code_variants_apart(self):
-        nums, _, dups = services._parse_numbers("9856325417\n919856325417\n9856325417", last10=False)
+        nums, _, dups = views._parse_numbers("9856325417\n919856325417\n9856325417", last10=False)
         self.assertEqual(nums, ["9856325417", "919856325417"])
         self.assertEqual(dups, 1)
 
     def test_last10_mode_treats_variants_as_duplicates(self):
-        nums, _, dups = services._parse_numbers("9856325417\n919856325417\n09856325417", last10=True)
+        nums, _, dups = views._parse_numbers("9856325417\n919856325417\n09856325417", last10=True)
         self.assertEqual(nums, ["9856325417"])
         self.assertEqual(dups, 2)
 
     def test_formatted_numbers_are_cleaned(self):
-        nums, _, _ = services._parse_numbers("+91 98563-25417")
+        nums, _, _ = views._parse_numbers("+91 98563-25417")
         self.assertEqual(nums, ["919856325417"])
 
 
@@ -307,23 +309,33 @@ class ScanTests(LockSafeMixin, TempDirMixin, TestCase):
 
 
 # ------------------------------------------------------------------ search API
-class ServiceTestCase(LockSafeMixin, TempDirMixin, TestCase):
+class ApiTestCase(LockSafeMixin, TempDirMixin, TestCase):
     @classmethod
     def setUpTestData(cls):
         User = get_user_model()
         cls.admin = User.objects.create_superuser("admin", "a@example.com", "pw")
         cls.staff = User.objects.create_user("staff", "s@example.com", "pw", is_staff=True)
+        cls.outsider = User.objects.create_user("outsider", "o@example.com", "pw", is_staff=False)
+
+    def login(self, user=None):
+        self.client.force_login(user or self.admin)
+
+    def post(self, name, data=None, **kw):
+        return self.client.post(reverse(name), data or {}, **kw)
 
 
-class SearchTests(ServiceTestCase):
+class SearchApiTests(ApiTestCase):
     def setUp(self):
         super().setUp()
+        self.login()
         self.alpha = index_file("alpha.xlsx", [9000000001, 9000000002, 9000000003])
         self.beta = index_file("beta.xlsx", [9000000002, 919856325417])
         self.gamma = index_file("gamma.xlsx", ["09111111111"])
 
-    def search(self, numbers, last10=True):
-        return services.bulk_search_payload(numbers, last10)
+    def search(self, numbers, **extra):
+        r = self.post("bulk_search", {"numbers": numbers, **extra})
+        self.assertEqual(r.status_code, 200)
+        return r.json()
 
     def test_counts_files_and_not_found(self):
         j = self.search("9000000001\n9000000002\n9000000003\n9999999999")
@@ -351,9 +363,9 @@ class SearchTests(ServiceTestCase):
         self.assertEqual(stored, {"919856325417", "09111111111"})
 
     def test_exact_mode_does_not_match_variants(self):
-        j = self.search("9856325417\n9111111111", last10=False)
+        j = self.search("9856325417\n9111111111", last10="0")
         self.assertEqual((j["summary"]["found"], j["summary"]["last10"]), (0, False))
-        j = self.search("919856325417", last10=False)
+        j = self.search("919856325417", last10="0")
         self.assertEqual(j["summary"]["found"], 1)
         self.assertEqual(j["results"][0]["matches"][0]["stored"], "")     # jaisa likha waisa mila
 
@@ -362,7 +374,7 @@ class SearchTests(ServiceTestCase):
         self.assertEqual(j["summary"]["searched"], 1)
         self.assertEqual(j["summary"]["duplicates"], 2)
         self.assertEqual(j["summary"]["skipped"], ["12"])
-        with mock.patch.object(services, "MAX_NUMBERS", 3):
+        with mock.patch.object(views, "MAX_NUMBERS", 3):
             j = self.search("\n".join(str(9000000100 + i) for i in range(10)))
         self.assertTrue(j["summary"]["truncated"])
         self.assertEqual(j["summary"]["searched"], 3)
@@ -372,45 +384,55 @@ class SearchTests(ServiceTestCase):
         self.assertEqual((j["summary"]["searched"], j["files"], j["results"]), (0, [], []))
 
     def test_numbers_are_chunked_without_losing_matches(self):
-        with mock.patch.object(services, "CHUNK", 2):
+        with mock.patch.object(views, "CHUNK", 2):
             j = self.search("9000000001\n9000000002\n9000000003\n9856325417\n9111111111")
         self.assertEqual(j["summary"]["found"], 5)
 
-    def test_file_locations(self):
-        items = {i["number"]: i["locations"] for i in services.file_locations(self.beta.id, "9000000002\n9856325417")}
+    def test_file_locations_api(self):
+        r = self.post("file_locations", {"file_id": self.beta.id, "numbers": "9000000002\n9856325417"})
+        self.assertEqual(r.status_code, 200)
+        items = {i["number"]: i["locations"] for i in r.json()["items"]}
         self.assertEqual(set(items), {"9000000002", "9856325417"})
         self.assertEqual(items["9856325417"][0]["stored"], "919856325417")
         self.assertEqual(items["9000000002"][0]["stored"], "")
+        self.assertEqual(self.post("file_locations", {"file_id": "x", "numbers": "1"}).status_code, 400)
 
-    def test_row_cells_reads_the_real_file(self):
+    def test_row_detail_reads_the_real_file(self):
         tmp = self.make_tmp()
         path = make_xlsx(tmp / "real.xlsx", [["Ravi", 9856325417]])
         f = FileIndex.objects.create(file_name="real.xlsx", file_path=path)
-        _file, cells, error, status = services.row_cells(f.id, "Data", 2, 2)
-        self.assertEqual((error, status), (None, None))
+        r = self.client.get(reverse("row_detail"), {"file_id": f.id, "sheet": "Data", "row": 2, "col": 2})
+        self.assertEqual(r.status_code, 200)
+        cells = r.json()["cells"]
         self.assertEqual([c["value"] for c in cells], ["Ravi", "9856325417"])
         self.assertEqual([c["header"] for c in cells], ["Name", "Phone"])
         self.assertEqual([c["hit"] for c in cells], [False, True])
 
-    def test_row_cells_errors(self):
-        self.assertEqual(services.row_cells(99999, "Data", 2)[2:], ("File not in index", 404))
+    def test_row_detail_errors(self):
+        url = reverse("row_detail")
+        self.assertEqual(self.client.get(url, {"file_id": 99999, "row": 2}).status_code, 404)
+        self.assertEqual(self.client.get(url, {"file_id": "x", "row": 2}).status_code, 400)
         gone = FileIndex.objects.create(file_name="gone.xlsx", file_path="/no/such/gone.xlsx")
-        self.assertEqual(services.row_cells(gone.id, "Data", 2)[3], 404)
+        self.assertEqual(self.client.get(url, {"file_id": gone.id, "sheet": "Data", "row": 2}).status_code, 404)
 
 
-class ExportTests(ServiceTestCase):
+class ExportTests(ApiTestCase):
     def setUp(self):
         super().setUp()
+        self.login()
         tmp = self.make_tmp()
         self.folder = str(tmp)
         index_file("alpha book.xlsx", [9856325417], folder=self.folder)
         index_file("with91.xlsx", [919856325417], folder=self.folder)
 
-    def load(self, data):
-        return openpyxl.load_workbook(io.BytesIO(data))
+    def load(self, response):
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("spreadsheetml", response["Content-Type"])
+        self.assertIn("attachment", response["Content-Disposition"])
+        return openpyxl.load_workbook(io.BytesIO(response.content))
 
     def test_export_has_all_sheets_links_paths_and_match_info(self):
-        wb = self.load(services.export_report("9856325417\n1112223334"))
+        wb = self.load(self.post("export_excel", {"numbers": "9856325417\n1112223334"}))
         self.assertEqual(wb.sheetnames, ["Summary", "By File", "Found", "Not Found"])
 
         by_file = list(wb["By File"].iter_rows(min_row=1, values_only=False))
@@ -430,7 +452,7 @@ class ExportTests(ServiceTestCase):
         self.assertTrue(summary["Match mode"].startswith("Last 10 digits"))
 
     def test_export_exact_mode(self):
-        wb = self.load(services.export_report("9856325417", last10=False))
+        wb = self.load(self.post("export_excel", {"numbers": "9856325417", "last10": "0"}))
         found = list(wb["Found"].iter_rows(min_row=2, values_only=True))
         self.assertEqual([r[2] for r in found], ["alpha book.xlsx"])
         summary = {r[0]: r[1] for r in wb["Summary"].iter_rows(min_row=3, values_only=True) if r[0]}
@@ -438,91 +460,134 @@ class ExportTests(ServiceTestCase):
 
     def test_file_report_from_uploaded_excel(self):
         up = SimpleUploadedFile("nums.xlsx", xlsx_bytes([[9856325417], [1112223334]]))
-        data, error, status = services.file_report(up)
-        self.assertEqual((error, status), (None, None))
-        wb = self.load(data)
+        wb = self.load(self.post("file_report", {"file": up}))
         self.assertEqual(len(list(wb["Found"].iter_rows(min_row=2))), 2)
         self.assertEqual(len(list(wb["Not Found"].iter_rows(min_row=2))), 1)
 
     def test_file_report_with_no_numbers_is_an_error(self):
-        data, error, status = services.file_report(SimpleUploadedFile("nums.txt", b"no digits here"))
-        self.assertEqual((data, status), (None, 400))
-        self.assertIn("No numbers", error)
-
-    def test_report_filename_is_dated(self):
-        self.assertRegex(services.xlsx_filename(), r"^number_search_report_\d{8}_\d{4}\.xlsx$")
+        up = SimpleUploadedFile("nums.txt", b"no digits here")
+        r = self.post("file_report", {"file": up})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("No numbers", r.json()["error"])
 
 
-class UploadTests(ServiceTestCase):
-    def extract(self, name, content, first_col=False, last10=True):
-        return services.read_upload_numbers(SimpleUploadedFile(name, content), first_col, last10)
+class UploadTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.login()
 
-    def numbers(self, *args, **kw):
-        result, error, _status = self.extract(*args, **kw)
-        self.assertIsNone(error)
-        return result[1]
+    def extract(self, name, content, **data):
+        up = SimpleUploadedFile(name, content)
+        return self.post("extract_numbers", {"file": up, **data})
 
     def test_csv_with_quotes_and_header(self):
-        self.assertEqual(self.numbers("n.csv", b'phone,name\n"9856325417",Ravi\n8569741235,Sita\n'), ["9856325417", "8569741235"])
+        r = self.extract("n.csv", b'phone,name\n"9856325417",Ravi\n8569741235,Sita\n')
+        self.assertEqual(r.json()["numbers"], ["9856325417", "8569741235"])
 
     def test_txt_dedupes_and_keeps_order(self):
-        result, _, _ = self.extract("n.txt", b"9000000020\n9000000020\n8000000006\n")
-        self.assertEqual(result, ("n.txt", ["9000000020", "8000000006"], 1))
+        r = self.extract("n.txt", b"9000000020\n9000000020\n8000000006\n")
+        j = r.json()
+        self.assertEqual(j["numbers"], ["9000000020", "8000000006"])
+        self.assertFalse(j["truncated"])
 
     def test_first_column_only(self):
-        self.assertEqual(self.numbers("n.csv", b"9856325417,8569741235\n9000000001,9000000002\n", first_col=True),
-                         ["9856325417", "9000000001"])
-        self.assertEqual(self.numbers("n.xlsx", xlsx_bytes([[9856325417, 8569741235]]), first_col=True), ["9856325417"])
+        r = self.extract("n.csv", b"9856325417,8569741235\n9000000001,9000000002\n", first_col="1")
+        self.assertEqual(r.json()["numbers"], ["9856325417", "9000000001"])
+        xl = self.extract("n.xlsx", xlsx_bytes([[9856325417, 8569741235]]), first_col="1")
+        self.assertEqual(xl.json()["numbers"], ["9856325417"])
 
     def test_excel_upload(self):
-        self.assertEqual(self.numbers("n.xlsx", xlsx_bytes([[9856325417], ["+91 98765 43210"]])), ["9856325417", "919876543210"])
+        r = self.extract("n.xlsx", xlsx_bytes([[9856325417], ["+91 98765 43210"]]))
+        self.assertEqual(r.json()["numbers"], ["9856325417", "919876543210"])
 
     def test_country_code_variants_are_merged_by_default(self):
-        self.assertEqual(self.numbers("n.txt", b"9856325417\n919856325417\n"), ["9856325417"])
-        self.assertEqual(len(self.numbers("n.txt", b"9856325417\n919856325417\n", last10=False)), 2)
+        r = self.extract("n.txt", b"9856325417\n919856325417\n")
+        self.assertEqual(r.json()["numbers"], ["9856325417"])
+        r = self.extract("n.txt", b"9856325417\n919856325417\n", last10="0")
+        self.assertEqual(len(r.json()["numbers"]), 2)
+
+    def test_screen_limit_marks_truncated(self):
+        body = "\n".join(str(9000000100 + i) for i in range(10)).encode()
+        with mock.patch.object(views, "MAX_NUMBERS", 4):
+            j = self.extract("n.txt", body).json()
+        self.assertEqual((len(j["numbers"]), j["total"], j["truncated"]), (4, 10, True))
 
     def test_bad_uploads(self):
-        self.assertEqual(self.extract("n.pdf", b"x")[1:], ("Unsupported file. Use .xlsx, .xls, .csv or .txt", 400))
-        self.assertEqual(services.read_upload_numbers(None)[1:], ("No file received", 400))
-        self.assertEqual(self.extract("bad.xlsx", b"not excel")[2], 400)
-        with mock.patch.object(services, "MAX_UPLOAD_MB", 0.0001):
-            self.assertEqual(self.extract("n.txt", b"9" * 500)[2], 413)
+        self.assertEqual(self.extract("n.pdf", b"x").status_code, 400)
+        self.assertEqual(self.post("extract_numbers").status_code, 400)
+        self.assertEqual(self.extract("bad.xlsx", b"not excel").status_code, 400)
+        with mock.patch.object(views, "MAX_UPLOAD_MB", 0.0001):
+            self.assertEqual(self.extract("n.txt", b"9" * 500).status_code, 413)
 
 
-class ScanControlTests(ServiceTestCase):
+# ------------------------------------------------------------------ permissions + scan control
+class PermissionTests(ApiTestCase):
+    API_POSTS = ["bulk_search", "file_locations", "extract_numbers", "export_excel", "clear_index",
+                 "file_report", "stop_scan", "start_scan"]
+
+    def test_anonymous_users_are_redirected_to_login(self):
+        for name in self.API_POSTS:
+            r = self.post(name)
+            self.assertEqual(r.status_code, 302, name)
+            self.assertIn("/admin/login/", r["Location"], name)
+
+    def test_non_staff_users_are_blocked(self):
+        self.login(self.outsider)
+        for name in self.API_POSTS:
+            self.assertEqual(self.post(name).status_code, 302, name)
+
+    def test_get_is_not_allowed_on_post_only_apis(self):
+        self.login()
+        self.assertEqual(self.client.get(reverse("bulk_search")).status_code, 405)
+
+    def test_clear_index_needs_delete_permission(self):
+        index_file("a.xlsx", [9856325417])
+        self.login(self.staff)                       # staff hai par delete permission nahi
+        self.assertEqual(self.post("clear_index").status_code, 403)
+        self.assertEqual(FileIndex.objects.count(), 1)
+
+    def test_browse_folders_is_superuser_only(self):
+        self.login(self.staff)
+        self.assertEqual(self.client.get(reverse("browse_folders")).status_code, 403)
+
+
+class ScanControlTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.login()
+
     def test_clear_index_removes_everything(self):
         index_file("a.xlsx", [9856325417, 9000000001])
         index_file("b.xlsx", [8569741235])
-        removed, error, _ = services.clear_index(self.admin)
-        self.assertEqual((removed, error), (2, None))
+        r = self.post("clear_index")
+        self.assertEqual((r.status_code, r.json()["files_removed"]), (200, 2))
         self.assertEqual((FileIndex.objects.count(), NumberIndex.objects.count()), (0, 0))
         self.assertFalse(scan_lock.locked())
 
     def test_clear_index_refuses_while_a_scan_runs(self):
         index_file("a.xlsx", [9856325417])
         scan_lock.acquire()
-        self.assertEqual(services.clear_index(self.admin)[1:], ("A scan is running. Please wait for it to finish.", 409))
-        self.assertEqual(FileIndex.objects.count(), 1)
-
-    def test_clear_index_needs_delete_permission(self):
-        index_file("a.xlsx", [9856325417])
-        self.assertEqual(services.clear_index(self.staff)[2], 403)       # staff hai par delete permission nahi
+        self.assertEqual(self.post("clear_index").status_code, 409)
         self.assertEqual(FileIndex.objects.count(), 1)
 
     def test_stop_scan(self):
-        self.assertEqual(services.stop_scan(), (False, "No scan is running"))      # kuch chal hi nahi raha
+        self.assertEqual(self.post("stop_scan").status_code, 409)       # kuch chal hi nahi raha
         scan_lock.acquire()
-        self.assertEqual(services.stop_scan(), (True, None))
+        self.assertEqual(self.post("stop_scan").status_code, 200)
         self.assertTrue(scanner.cancel_event.is_set())
 
     def test_start_scan_validation(self):
-        self.assertEqual(services.start_scan(self.admin, "nope")[1:], ("Invalid location", 400))
-        self.assertEqual(services.start_scan(self.admin, "__custom__", "/definitely/not/here")[2], 400)
-        self.assertEqual(services.start_scan(self.staff, "__custom__", "/")[2], 403)      # custom folder sirf superuser
+        self.assertEqual(self.post("start_scan", {"location": "nope"}).status_code, 400)
+        r = self.post("start_scan", {"location": "__custom__", "custom_path": "/definitely/not/here"})
+        self.assertEqual(r.status_code, 400)
+        self.login(self.staff)
+        r = self.post("start_scan", {"location": "__custom__", "custom_path": "/"})
+        self.assertEqual(r.status_code, 403)                            # custom folder sirf superuser
 
     def test_start_scan_refuses_second_scan(self):
         scan_lock.acquire()
-        self.assertEqual(services.start_scan(self.admin, "__custom__", str(self.make_tmp()))[2], 409)
+        r = self.post("start_scan", {"location": "__custom__", "custom_path": str(self.make_tmp())})
+        self.assertEqual(r.status_code, 409)
 
     def test_start_scan_starts_a_task(self):
         tmp = self.make_tmp()
@@ -532,27 +597,28 @@ class ScanControlTests(ServiceTestCase):
             started.append((task_id, root))
             scan_lock.release()                   # asli run_scan bhi yahi karta hai
 
-        with mock.patch.object(services, "run_scan", fake_scan):
+        with mock.patch.object(views, "run_scan", fake_scan):
             ScanTask.objects.create(status="Running")                    # purana atka hua task
-            task_id, error, _ = services.start_scan(self.admin, "__custom__", str(tmp))
-            self.assertEqual(error, None)
+            r = self.post("start_scan", {"location": "__custom__", "custom_path": str(tmp)})
+            self.assertEqual(r.status_code, 200)
             for _ in range(40):
                 if started:
                     break
                 time.sleep(0.05)
-        self.assertEqual(started[0], (task_id, str(tmp)))
+        self.assertEqual(started[0][1], str(tmp))
         self.assertEqual(ScanTask.objects.filter(status="Error", message="Interrupted").count(), 1)
 
-    def test_scan_status(self):
+    def test_check_scan_status(self):
+        self.assertEqual(self.client.get(reverse("check_scan", args=[99999])).status_code, 404)
         t = ScanTask.objects.create(status="Completed", files_indexed=3, files_failed=1)
-        j = services.scan_status(t)
+        j = self.client.get(reverse("check_scan", args=[t.id])).json()
         self.assertEqual((j["status"], j["files_indexed"], j["files_failed"]), ("Completed", 3, 1))
         self.assertIsNone(j["files_total"])
 
-    def test_scan_status_reports_total_for_the_running_scan(self):
+    def test_check_scan_status_reports_total_for_the_running_scan(self):
         t = ScanTask.objects.create(status="Running")
         with mock.patch.dict(scanner.scan_progress, {"task_id": t.id, "total": 120, "counted": 120}):
-            j = services.scan_status(t)
+            j = self.client.get(reverse("check_scan", args=[t.id])).json()
         self.assertEqual((j["files_total"], j["files_counted"]), (120, 120))
 
     def test_browse_folders_lists_sub_folders(self):
@@ -561,9 +627,88 @@ class ScanControlTests(ServiceTestCase):
         (tmp / "alpha").mkdir()
         (tmp / ".hidden").mkdir()
         (tmp / "file.txt").write_text("x")
-        data, error, _ = services.browse_folders(str(tmp))
-        self.assertEqual([f["name"] for f in data["folders"]], ["alpha", "Beta"])     # hidden aur files nahi
-        self.assertEqual(services.browse_folders("/no/such")[1:], ("Folder not found", 400))
+        j = self.client.get(reverse("browse_folders"), {"path": str(tmp)}).json()
+        self.assertEqual([f["name"] for f in j["folders"]], ["alpha", "Beta"])     # hidden aur files nahi
+        self.assertEqual(self.client.get(reverse("browse_folders"), {"path": "/no/such"}).status_code, 400)
+
+
+# ------------------------------------------------------------------ admin pages
+class AdminPageTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.login()
+
+    def get(self, name, *args, **kw):
+        r = self.client.get(reverse(name, args=args), **kw)
+        self.assertEqual(r.status_code, 200, name)
+        return r
+
+    def test_main_pages_open_and_sidebar_is_in_workflow_order(self):
+        html = self.get("admin:index").content.decode()
+        positions = [html.index(t) for t in ("Scan &amp; Index Files", "Bulk Number Search", "Scan History")]
+        self.assertEqual(positions, sorted(positions))
+        self.get("admin:fileindex_fileindex_changelist")
+        self.get("admin:fileindex_bulksearch_changelist")
+        self.get("admin:fileindex_scantask_changelist")
+
+    def test_search_page_without_index_shows_the_scan_first_banner(self):
+        r = self.get("admin:fileindex_bulksearch_changelist")
+        self.assertContains(r, "Nothing is indexed yet")
+        self.assertNotContains(r, 'class="index-info')
+
+    def test_search_page_shows_index_age_and_warns_when_stale(self):
+        index_file("a.xlsx", [9856325417])
+        ScanTask.objects.create(status="Completed")
+        r = self.get("admin:fileindex_bulksearch_changelist")
+        self.assertContains(r, "indexed file")
+        self.assertNotContains(r, "days old")
+
+        ScanTask.objects.update(created_at=timezone.now() - datetime.timedelta(days=9))
+        r = self.get("admin:fileindex_bulksearch_changelist")
+        self.assertContains(r, "days old")
+        self.assertTrue(r.context["index_is_stale"])
+
+    def test_scan_page_warns_about_failed_files_and_history_lists_them(self):
+        task = ScanTask.objects.create(status="Completed", files_failed=2)
+        ScanFailure.objects.create(task=task, file_path="/x/broken.xlsx", reason="File is corrupted or not a real Excel file")
+        ScanFailure.objects.create(task=task, file_path="/x/locked.xlsx", reason="No permission to read this file")
+
+        r = self.get("admin:fileindex_fileindex_changelist")
+        self.assertContains(r, "2 files could not be read")
+        self.assertContains(r, reverse("admin:fileindex_scantask_change", args=[task.id]))
+
+        r = self.get("admin:fileindex_scantask_change", task.id)
+        for text in ("/x/broken.xlsx", "corrupted", "/x/locked.xlsx", "No permission"):
+            self.assertContains(r, text)
+        self.assertNotContains(r, 'name="_save"')                       # history: edit nahi
+
+    def test_scan_page_has_no_failure_warning_when_all_files_read(self):
+        ScanTask.objects.create(status="Completed", files_failed=0)
+        self.assertNotContains(self.get("admin:fileindex_fileindex_changelist"), "could not be read")
+
+    def test_scan_history_cannot_be_added_to(self):
+        self.assertEqual(self.client.get(reverse("admin:fileindex_scantask_add")).status_code, 403)
+
+    def test_file_list_search_finds_file_by_phone_number_in_any_format(self):
+        index_file("hit.xlsx", [919856325417])
+        index_file("miss.xlsx", [9000000001])
+        url = reverse("admin:fileindex_fileindex_changelist")
+        for q in ("9856325417", "+919856325417", "09856325417"):   # (space se numbers alag hote hain, isliye bina space)
+            r = self.client.get(url, {"q": q})
+            names = [f.file_name for f in r.context["cl"].result_list]
+            self.assertEqual(names, ["hit.xlsx"], q)
+        self.assertEqual([f.file_name for f in self.client.get(url, {"q": "miss"}).context["cl"].result_list], ["miss.xlsx"])
+
+    def test_search_page_has_the_expected_controls(self):
+        index_file("a.xlsx", [9856325417])
+        html = self.get("admin:fileindex_bulksearch_changelist").content.decode()
+        for element in ("bulkSearchBtn", "last10", "historyBtn", "fileFilter", "fileSort", "missingDownloadBtn"):
+            self.assertIn(f'id="{element}"', html)
+
+    def test_scan_page_has_the_expected_controls(self):
+        html = self.get("admin:fileindex_fileindex_changelist").content.decode()
+        for element in ("scanBtn", "stopScanBtn", "clearIndexBtn", "confirmOverlay", "scanBar", "scanEta"):
+            self.assertIn(f'id="{element}"', html)
 
 
 # ------------------------------------------------------------------ migration + settings

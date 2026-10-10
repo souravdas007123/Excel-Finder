@@ -170,7 +170,7 @@ def check_now():
     state = _read()
     try:
         latest = fetch_latest()
-    except (urllib.error.URLError, TimeoutError, OSError):
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
         state.update(checked_at=_now().isoformat(), error="Could not reach the update server.")
         _write(state)
         return Result(False, "Could not reach the update server. Please check your internet connection.")

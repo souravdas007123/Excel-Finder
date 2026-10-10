@@ -1,6 +1,5 @@
 """License page (account, plan, sign in / create account, key) aur 'naya version' ke buttons. Sab licensing.service se chalta hai."""
 from django.conf import settings
-from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
 
@@ -111,17 +110,3 @@ def update_check_now(request):
 def update_dismiss(request):
     update_check.dismiss(request.POST.get("version", ""))
     return _banner(request)
-
-
-@staff_required
-@require_POST
-def update_install(request):
-    """'Update now': naya Setup.exe download + jaanch + install (search/update_check.py)."""
-    result = update_check.start_install()
-    return JsonResponse({"ok": result.ok, "message": result.message})
-
-
-@staff_required
-@require_GET
-def update_status(request):
-    return JsonResponse(update_check.install_status())

@@ -10,7 +10,7 @@
     </div>
     <div class="alert-actions">
         {% if update_notice.one_click %}
-        <button type="button" id="ub-install" class="btn btn-primary btn-sm" data-install="{% url 'webui:update_install' %}" data-status="{% url 'webui:update_status' %}"{% if update_notice.installing %} disabled{% endif %}>Update now</button>
+        <button type="button" id="ub-install" class="btn btn-primary btn-sm" data-install="{% url 'update_install' %}" data-status="{% url 'update_status' %}"{% if update_notice.installing %} disabled{% endif %}>Update now</button>
         {% endif %}
         <a class="btn btn-sm{% if not update_notice.one_click %} btn-primary{% endif %}" href="{{ update_notice.download_url }}" target="_blank" rel="noopener noreferrer">Download</a>
         {% if not update_notice.critical %}

@@ -14,6 +14,8 @@ CONSOLE = os.environ.get("EXCEL_FINDER_CONSOLE") == "1"     # debugging: console
 datas = collect_data_files("django")                           # admin templates / static / locale
 datas += [
     (os.path.join(ROOT, "templates"), "templates"),
+    (os.path.join(ROOT, "fileindex", "templates"), os.path.join("fileindex", "templates")),
+    (os.path.join(ROOT, "licensing", "templates"), os.path.join("licensing", "templates")),
     (os.path.join(ROOT, "webui", "templates"), os.path.join("webui", "templates")),       # naya UI (htmx)
     (os.path.join(ROOT, "staticfiles"), "staticfiles"),        # python manage.py collectstatic ka output
 ]

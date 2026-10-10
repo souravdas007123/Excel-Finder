@@ -38,7 +38,7 @@
             {% endif %}
             <div class="side-meta">
                 <span>v{{ app_version }}</span>
-                {% if can_use_admin %}<a href="/admin/" hx-boost="false" title="Add or remove people who can use this app">Manage users {% icon "external" 13 %}</a>{% endif %}
+                {% if can_use_admin %}<a href="/admin/" hx-boost="false" title="Open the classic admin panel">Admin panel {% icon "external" 13 %}</a>{% endif %}
             </div>
             <div class="side-meta">
                 <span>{% icon "user" 14 %} {{ request.user.get_username|truncatechars:22 }}</span>
@@ -63,10 +63,6 @@
             </button>
         </header>
         <div class="content">
-            {% if license_warn and active != 'license' %}
-            <div class="banner"><div class="alert warn" role="status">{% icon "alert" 18 %}<div class="grow">{{ license_warn }}</div>
-                <a class="btn btn-sm" href="{% url 'webui:license' %}" {% navattrs %}>License</a></div></div>
-            {% endif %}
             {% include "webui/partials/_update_banner.html" %}
             {% block content %}{% endblock %}
         </div>

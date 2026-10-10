@@ -17,7 +17,7 @@
     {% endif %}
 
     <div class="card">
-        <form id="search-form" method="post" action="{% url 'webui:search_export' %}" enctype="multipart/form-data" hx-boost="false" autocomplete="off">
+        <form id="search-form" method="post" action="/admin/export-excel-api/" enctype="multipart/form-data" hx-boost="false" autocomplete="off">
             {% csrf_token %}
             <div class="card-head">
                 <h2>{% icon "hash" 18 %} Phone numbers</h2>
