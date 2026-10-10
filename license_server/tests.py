@@ -674,3 +674,33 @@ class ReleaseTests(ServerTestCase):
             codes = [self.latest().status_code for _ in range(4)]
         self.assertEqual(codes[:2], [200, 200])
         self.assertEqual(codes[-1], 429)
+
+
+class EnvFileTests(ServerTestCase):
+    """`server.env`: hosting par secret settings ek file me (PythonAnywhere)."""
+
+    def load(self, text, **env):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from . import server_settings
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "server.env"
+            path.write_text(text, encoding="utf-8")
+            with mock.patch.dict(os.environ, env, clear=False):
+                for name in ("EF_TEST_A", "EF_TEST_B", "EF_TEST_C", "EF_TEST_D"):
+                    os.environ.pop(name, None) if name not in env else None
+                server_settings.load_env_file(path)
+                return {name: os.environ.get(name) for name in ("EF_TEST_A", "EF_TEST_B", "EF_TEST_C", "EF_TEST_D")}
+
+    def test_reads_plain_quoted_and_commented_lines(self):
+        got = self.load("# comment\n\nEF_TEST_A=one\nEF_TEST_B = 'two words'\nEF_TEST_C=\"three\"\nnot a line\nEF_TEST_D=a=b=c\n")
+        self.assertEqual(got, {"EF_TEST_A": "one", "EF_TEST_B": "two words", "EF_TEST_C": "three", "EF_TEST_D": "a=b=c"})
+
+    def test_a_real_environment_variable_wins(self):
+        self.assertEqual(self.load("EF_TEST_A=from-file", EF_TEST_A="from-env")["EF_TEST_A"], "from-env")
+
+    def test_a_missing_file_is_fine(self):
+        from . import server_settings
+        server_settings.load_env_file("/no/such/server.env")
