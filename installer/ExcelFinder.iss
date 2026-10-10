@@ -24,6 +24,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist\installer
 OutputBaseFilename=ExcelFinder-Setup-{#AppVersion}
+SetupIconFile=icon.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
