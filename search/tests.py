@@ -3,7 +3,6 @@
 Chalane ke liye:  python manage.py test search
 """
 import importlib.util
-import json
 import os
 import subprocess
 import sys
@@ -15,7 +14,6 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings
-from django.urls import reverse
 
 from licensing import protocol, service
 from . import middleware as first_run
@@ -111,7 +109,7 @@ class FirstRunSetupTests(TestCase):
         self.addCleanup(first_run.reset_first_run_cache)
 
     def test_every_page_goes_to_setup_while_there_is_no_user(self):
-        for path in ("/", "/admin/", "/admin/login/", "/admin/fileindex/bulksearch/"):
+        for path in ("/", "/admin/", "/admin/login/", "/app/", "/app/search/"):
             r = self.client.get(path)
             self.assertRedirects(r, "/setup/", fetch_redirect_response=False, msg_prefix=path)
         self.assertEqual(self.client.get("/setup/").status_code, 200)

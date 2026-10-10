@@ -48,11 +48,3 @@ class ScanFailure(models.Model):
 
     def __str__(self):
         return self.file_path
-
-
-class BulkSearch(FileIndex):
-    """Sirf admin sidebar me 'Bulk Number Search' ka link dikhane ke liye (proxy = koi nayi table nahi banti)."""
-    class Meta:
-        proxy = True
-        verbose_name = "Bulk Number Search"
-        verbose_name_plural = "Bulk Number Search"
