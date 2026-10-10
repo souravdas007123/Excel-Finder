@@ -170,8 +170,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* ---------- progress ---------- */
 .progress { height: 10px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
 .progress > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), #8b5cf6); transition: width .8s ease; }
-.progress.indeterminate > span { width: 35% !important; animation: slide 1.3s ease-in-out infinite; }
-@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.progress { position: relative; }
+.progress.indeterminate::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 35%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), #8b5cf6); animation: slide 1.3s ease-in-out infinite; }
+@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(290%); } }
 .scan-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; font-weight: 600; flex-wrap: wrap; }
 .scan-file { margin-top: 10px; color: var(--muted); font-size: 12.5px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
